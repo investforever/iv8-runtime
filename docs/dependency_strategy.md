@@ -82,22 +82,33 @@ and a rule in `AGENTS.md`).
 | V8 version string | **`15.0.245.19`** |
 | V8 git commit | **`209c9cea0db17d8caf23e9d2c7de08c351609744`** |
 | V8 release branch | `refs/branch-heads/15.0` |
-| Source of truth | Chromium stable milestone **150** (`150.0.7871.126`) |
+| Origin milestone | Chromium milestone **150** (`150.0.7871.126`) |
 | Upstream repo | `https://chromium.googlesource.com/v8/v8.git` |
 | GitHub mirror | `https://github.com/v8/v8` |
 
-### 2.1 Why this revision
+### 2.1 Current Chrome stable at the Phase 0 date (for context, NOT the M1 pin)
 
-- It is the V8 that ships in the **current Chrome stable channel (milestone 150)** as of
-  the Phase 0 date (2026-07-16), verified via the Chromium dashboard
-  (`https://chromiumdash.appspot.com/fetch_version?version=150.0.7871.126`). Embedders are
-  advised to track the branch that ships in Chrome stable, not `main`.
+As of 2026-07-16 the Chromium dashboard reports the **current** Chrome stable as
+**`151.0.7922.34`** (promoted for Windows on 2026-07-15 20:38:21 UTC), corresponding to
+**V8 `15.1.206.8`**, commit **`f479186c16abdb6fa05539fe957bb84deee830df`**. This is
+recorded only so the M1 pin's position relative to current stable is explicit. M1 does
+**not** adopt 15.1.206.8.
+
+### 2.2 Why M1 pins 15.0.245.19
+
+- **It is the previous-generation, stability-cycle-validated stable baseline.** Milestone
+  150 completed a full stable cycle before milestone 151 was promoted, so 15.0.245.19 has
+  accumulated a cycle of stabilization and security patches. M1 deliberately trails one
+  milestone behind the bleeding edge for a conservative first bring-up.
 - Pinning to a specific `major.minor.build.patch` tag on a **release branch-head** gives a
-  seasoned, security-patched, and reproducible tree rather than a moving branch.
-- It is not the bleeding-edge branch (15.1 / Chrome 151 was still promoting to stable at
-  the Phase 0 date), so it has had time to accumulate stability and security fixes.
+  reproducible tree rather than a moving branch; a floating `main`/`master` or bare branch
+  name is forbidden as a default (`implementation_plan.md` §4 review gate, `AGENTS.md`).
+- **This document no longer claims 15.0.245.19 is the current Chrome stable.** It is the
+  last-generation stable. If a project goal later requires tracking the *current* stable,
+  the switch target is V8 `15.1.206.8` (commit `f479186c16abdb6fa05539fe957bb84deee830df`)
+  via the upgrade procedure in §9 — not a silent change.
 
-### 2.2 How the pin is recorded (for Phase 1+)
+### 2.3 How the pin is recorded (for Phase 1+)
 
 The revision above is authoritative. When build configuration exists, it must record the
 commit hash and version string in exactly one place (a `cmake/` variable file or a
@@ -115,10 +126,16 @@ locally-installed system V8.
 - V8 bundles third-party components with their own permissive licenses (ICU — Unicode/ICU
   license; zlib; `fdlibm`; and others enumerated in V8's `LICENSE` and
   `third_party/*/LICENSE`). The aggregate notice file must be included.
-- **Action for Phase 9 (packaging):** collect V8's `LICENSE` plus the transitive
-  third-party notices into the wheel (e.g. a `iv8/THIRD_PARTY_NOTICES` data file) and
-  reference them from project metadata. No copyleft components are pulled in by the default
-  monolith configuration, so static linking into a distributable wheel is permitted.
+- **License manifest is generated and audited from the pinned commit's `DEPS`, not
+  asserted here.** This document does **not** claim the default monolith configuration is
+  copyleft-free — that conclusion requires auditing the actual dependency set that
+  `15.0.245.19`'s `DEPS` (and the enabled `gn` args) pull in.
+- **Action for Phase 9 (packaging):** for the pinned V8 commit, enumerate the effective
+  third-party dependencies (from `DEPS` and the build graph), generate a third-party
+  license manifest, **audit it for any copyleft or redistribution-incompatible terms**, and
+  only then confirm the wheel may statically link and redistribute V8. Bundle V8's
+  `LICENSE` plus the audited transitive notices into the wheel (e.g. a
+  `iv8/THIRD_PARTY_NOTICES` data file) and reference them from project metadata.
 - The `iv8-runtime` project code itself carries its own project license (to be set in
   Phase 1 `pyproject.toml`); it is separate from V8's.
 
@@ -163,7 +180,11 @@ ignored build dir (`AGENTS.md` repository-layout rule; `implementation_plan.md` 
 
 Reproducible, revision-pinned, no moving branch:
 
-1. Fetch `depot_tools` (Google's `gclient`/`gn`/`ninja` bootstrap) into `data/`.
+1. Fetch `depot_tools` (Google's `gclient`/`gn`/`ninja` bootstrap) into `data/` **and
+   check it out to a pinned commit** (recorded in build config alongside the V8 pin).
+   Set **`DEPOT_TOOLS_UPDATE=0`** so `depot_tools` does not silently self-update to a
+   moving `HEAD` on invocation. `depot_tools` is a reproducibility input, not a rolling
+   tool.
 2. `fetch v8` (or `gclient sync`) to create the V8 checkout.
 3. **Check out the exact commit** `209c9cea0db17d8caf23e9d2c7de08c351609744`
    (tag `15.0.245.19`) and run `gclient sync -D` so all `DEPS`-pinned sub-dependencies are
@@ -173,9 +194,12 @@ Reproducible, revision-pinned, no moving branch:
 5. `ninja -C <out> v8_monolith`.
 6. Consume the resulting static library + `include/` headers from CMake in Phase 1+.
 
-The pinned commit and the `depot_tools` revision together define the reproducible input
-set. CI caches the built monolith per (platform, arch, V8 revision) to avoid rebuilding V8
-on every job.
+The reproducible input set is the triple **(V8 commit, `depot_tools` commit, build
+environment)**. To make the build environment itself reproducible, CI builds V8 inside a
+container pinned by **image digest** (`@sha256:…`), not a mutable tag. The exact
+`depot_tools` commit and the container image digest are recorded in build config next to
+the V8 pin; none of the three may drift silently. CI caches the built monolith per
+(platform, arch, V8 revision) to avoid rebuilding V8 on every job.
 
 ### 5.2 Linux (primary bring-up platform)
 
@@ -200,19 +224,27 @@ on every job.
 ### 5.4 Windows
 
 Windows is the hardest V8 build and carries a real ABI risk documented by the V8 embedder
-community (mixing V8's clang-cl + libc++ with an MSVC-built extension causes linker/ABI
-errors; a reported symptom/mitigation is `/Zc:dllexportInlines-`).
+community: if the V8 monolith and the CPython extension are built against **different C++
+standard libraries or CRTs**, linking fails or produces undefined behavior (a reported
+symptom/mitigation is `/Zc:dllexportInlines-`).
 
-Strategy for M1:
-- Build V8 with `is_clang=true` (clang-cl, V8's default and tested toolchain) and
-  `use_custom_libcxx=false` so V8 uses the **MSVC STL** against the `/MD` dynamic CRT.
-- Build the CPython extension with the **same CRT (`/MD`) and, where practical, clang-cl**,
-  or MSVC configured to the same runtime, so the standard-library ABI matches across the
-  boundary.
+**The governing rule for M1 is a single ABI across the whole binary: the V8 monolith and
+the CPython extension MUST be built with the same compiler front end, the same C++ STL,
+and the same CRT.** M1 does not use libc++ on Windows.
+
+Concretely, the M1 Windows configuration is:
+- Compiler: **clang-cl** (V8's default and tested Windows front end).
+- C++ standard library: **MSVC STL** (`use_custom_libcxx=false` — do **not** use V8's
+  bundled libc++ on Windows).
+- CRT: **`/MD`** (dynamic release CRT), matched on both sides.
+- The CPython extension is built with the **same** clang-cl + MSVC STL + `/MD` triple. If
+  the extension must use MSVC (`cl.exe`) instead of clang-cl, it must still target the same
+  MSVC STL + `/MD` ABI, and an ABI-matching spike is required first.
 - Output: `v8_monolith.lib`.
-- This platform's toolchain choice is the single biggest Phase-0 risk and is listed as an
-  open question (§10) requiring confirmation before Windows is promoted to a release
-  target.
+
+This platform's toolchain choice is the single biggest Phase-0 risk and is listed as an
+open question (§10) requiring confirmation before Windows links V8 (Phase 2), though it
+does not block the V8-free Phase 1 skeleton.
 
 ### 5.5 Build configuration (`args.gn`)
 
@@ -224,8 +256,8 @@ target_cpu = "x64"                    # or "arm64" on Apple Silicon
 v8_monolithic = true
 v8_static_library = true
 is_component_build = false
-v8_use_external_startup_data = false  # embed the snapshot -> self-contained binary
-v8_enable_i18n_support = true         # ICU on; embed ICU data (no external icudtl.dat)
+v8_use_external_startup_data = false  # embed ONLY the startup snapshot into the binary
+v8_enable_i18n_support = false        # ICU OFF for M1 -> no icudtl.dat, no Intl guarantee
 use_custom_libcxx = false             # share the platform C++ std library ABI
 symbol_level = 1
 # Pointer compression + sandbox are left at the branch-head defaults so we stay on
@@ -238,14 +270,22 @@ symbol_level = 1
 ```gn
 is_debug = true
 v8_enable_verify_heap = true
-# same monolith/i18n/libcxx settings as release
+# same monolithic/static/i18n-off/libcxx settings as release
 ```
 
 Notes:
-- `v8_use_external_startup_data=false` and embedded ICU data are deliberate so the wheel is
-  self-contained and passes `test_plan.md` §14 (no developer-machine path dependency).
-- `EngineRuntime` (architecture §6.1) initializes ICU + snapshot from the embedded data;
-  no separate `icudtl.dat`/`snapshot_blob.bin` files are shipped.
+- **ICU is disabled in M1** (`v8_enable_i18n_support=false`). Consequently M1 ships **no
+  `icudtl.dat`** and makes **no guarantee about the ECMAScript `Intl` API** (locale-aware
+  `Intl.*`, `toLocaleString`, etc. are out of scope). This keeps the wheel self-contained
+  without an ICU-data acquisition/packaging step. Enabling i18n later (bundling
+  `icudtl.dat` into the wheel, or embedding ICU data) is a deliberate future change under
+  §9, not an M1 assumption.
+- `v8_use_external_startup_data=false` embeds **only the V8 startup snapshot**
+  (`snapshot_blob`) into the binary. It does **not** embed ICU data — the two are
+  independent. With ICU off there is no ICU data to embed or ship at all.
+- `EngineRuntime` (architecture §6.1) initializes the embedded startup snapshot. Because
+  i18n is off, no ICU initialization is required — consistent with architecture §6.1's "as
+  required by the pinned build". No separate `snapshot_blob.bin` file is shipped.
 - Any change to pointer-compression, sandbox, or i18n settings is a rebuild-everything,
   ABI-level change and follows the upgrade procedure in §9.
 
@@ -259,8 +299,8 @@ Notes:
 | **Phase 1 skeleton dev/build** | May be done on the developer's **Windows 11 x64 natively** — Phase 1 has no V8 dependency (pure pybind11 + scikit-build-core placeholder), so it does not need the Linux path. |
 | **Supported OSes (release goal)** | Linux, macOS, Windows |
 | **CPU architectures** | Primary: **x86-64** (all three OSes) + **arm64 on macOS**. Secondary/future: Linux aarch64. Not targeted in M1: Windows arm64. |
-| **Python versions** | **3.10 – 3.13** supported; **3.12 is the primary development interpreter**. Floor raised from architecture's "3.9 or newer" because 3.9 is EOL (Oct 2025); the "subject to the selected toolchain" clause permits this refinement, so no architecture edit is required. Python 3.14 is a fast-follow candidate once wheels are validated. |
-| **Python ABI** | pybind11 does not use the stable ABI (`abi3`) effectively; M1 builds **per-version wheels** (`cp310`/`cp311`/`cp312`/`cp313`). |
+| **Python versions** | **3.11 – 3.14** supported; **primary development interpreter is 3.12 or 3.13**. Floor raised from architecture's "3.9 or newer" because 3.9 is already EOL (Oct 2025) and 3.10 reaches EOL in Oct 2026; 3.14 is stable at the Phase 0 date and is included now. The "subject to the selected toolchain" clause in architecture §3 permits this refinement, so no architecture edit is required. |
+| **Python ABI** | pybind11 does not use the stable ABI (`abi3`) effectively; M1 builds **per-version wheels** (`cp311`/`cp312`/`cp313`/`cp314`). |
 | **Compilers** | Linux/macOS: **clang** (V8's bundled clang for V8; matching clang for the extension). Windows: **clang-cl** (matching V8) with `/MD` CRT; MSVC only if ABI-matched. |
 | **Build type** | Release wheels from release monolith; one debug/assertions + sanitizer build on the Linux dev platform (`test_plan.md` §4, §15). |
 
@@ -316,9 +356,10 @@ decisions are:
 V8 upgrades are planned maintenance, never automatic source synchronization. This refines
 `implementation_plan.md` §14 with the dependency-specific steps:
 
-1. **Select** a new stable revision by the same rule as §2: read the Chromium dashboard for
-   the then-current Chrome stable milestone, take its exact V8 `major.minor.build.patch`
-   tag and commit hash.
+1. **Select** a new revision by the same conservative rule as §2.2: read the Chromium
+   dashboard, and take the exact V8 `major.minor.build.patch` tag + commit hash of the
+   chosen milestone (default: the last-generation stable that has completed a full cycle;
+   the current stable only if a project goal explicitly requires tracking it).
 2. **Record** the new commit + version string in build config in one isolated change.
 3. **Review the delta** since `15.0.245.19`: V8 public-API changes, `DEPS`/toolchain moves,
    `gn` arg renames/removals, snapshot/ICU/startup-data assumptions, pointer-compression /
@@ -340,49 +381,74 @@ this controlled procedure. The pin never silently follows a branch.
 ### 10.1 Decisions (fixed)
 
 1. **V8 pinned** to `15.0.245.19`, commit `209c9cea0db17d8caf23e9d2c7de08c351609744`,
-   branch `refs/branch-heads/15.0` (Chrome stable milestone 150).
+   branch `refs/branch-heads/15.0`, positioned as the **previous-generation,
+   stability-cycle-validated stable baseline** (milestone 150), NOT the current Chrome
+   stable. Current stable at the Phase 0 date is V8 `15.1.206.8` / Chrome 151 (§2.1),
+   recorded but not adopted.
 2. **Static linking** via `v8_monolith`; dynamic/component builds rejected for distribution.
 3. **Build from source** from the pinned revision via `depot_tools`/`gn`/`ninja`; no system
-   V8, no stale third-party prebuilt monolith.
-4. **`args.gn`** fixed (§5.5): monolithic, static, embedded snapshot + ICU data,
-   `use_custom_libcxx=false`, branch-default pointer-compression/sandbox.
+   V8, no stale third-party prebuilt monolith. Reproducibility triple = (V8 commit,
+   pinned `depot_tools` commit, container image digest); `DEPOT_TOOLS_UPDATE=0` (§5.1).
+4. **`args.gn`** fixed (§5.5): monolithic, static, `v8_use_external_startup_data=false`
+   (embeds the startup snapshot only), **`v8_enable_i18n_support=false` (ICU off, no
+   `icudtl.dat`, no `Intl` guarantee)**, `use_custom_libcxx=false`, branch-default
+   pointer-compression/sandbox.
 5. **First V8 bring-up platform = Linux x86-64** (via WSL2/container on the Windows host);
    **Phase 1 skeleton may be built on Windows 11 x64 natively** (no V8 needed).
 6. **Supported matrix:** Linux/macOS/Windows; x86-64 everywhere + macOS arm64; Python
-   3.10–3.13 (dev on 3.12); per-version pybind11 wheels; clang/clang-cl toolchains.
-7. **Python floor raised to 3.10** (3.9 EOL), within architecture's delegated clause.
-8. **License:** V8 BSD-3-Clause + transitive permissive notices bundled in the wheel.
-9. **Upgrade procedure** defined (§9); pin never follows a moving branch.
-10. **STPyV8** retained/rejected decisions recorded (§8).
+   **3.11–3.14** (dev on 3.12 or 3.13); per-version pybind11 wheels
+   (`cp311`–`cp314`); clang/clang-cl toolchains.
+7. **Python floor raised to 3.11** (3.9 EOL, 3.10 EOL Oct 2026), within architecture's
+   delegated clause; 3.14 included now.
+8. **License:** V8 BSD-3-Clause; third-party license manifest is **generated and audited
+   from the pinned commit's `DEPS`** in Phase 9 (no unaudited copyleft-free claim), then
+   bundled in the wheel (§3).
+9. **Windows single-ABI rule:** V8 monolith and extension share clang-cl + MSVC STL + `/MD`
+   (§5.4); libc++ is not used on Windows.
+10. **Upgrade procedure** defined (§9); pin never follows a moving branch.
+11. **STPyV8** retained/rejected decisions recorded (§8).
 
 ### 10.2 Open questions (need user confirmation before affected phases)
 
-1. **Windows toolchain (highest risk).** Confirm the extension is built with clang-cl
-   `/MD` to ABI-match V8's clang-cl monolith. If MSVC is mandatory, an ABI-matching spike
-   is required before Windows becomes a release target.
-2. **Python 3.14 inclusion.** Include 3.14 in the M1 support matrix now, or add as a
-   fast-follow after 3.10–3.13 wheels are validated?
-3. **macOS packaging shape.** Per-arch wheels (arm64 + x64 separately) vs a single
-   `universal2` wheel for M1.
-4. **Linux baseline for wheels.** Which `manylinux` standard (e.g. `manylinux_2_28`)
-   defines the glibc floor for release wheels (Phase 9 decision; flagged early).
-5. **CPU heap cap acceptable?** Branch-default pointer compression caps per-isolate heap
+1. **Windows toolchain (highest risk).** The M1 rule is fixed (clang-cl + MSVC STL + `/MD`,
+   §5.4); the open item is confirming, via an ABI-matching spike, that the extension links
+   the clang-cl V8 monolith cleanly — or, if MSVC (`cl.exe`) is mandatory for the
+   extension, that it targets the same MSVC STL + `/MD` ABI. Must be resolved **before
+   Phase 2** on Windows; does not block Phase 1.
+2. **CPU heap cap acceptable?** Branch-default pointer compression caps per-isolate heap
    near 4 GB. Confirm this is acceptable for M1's intended workloads.
-6. **Test-layout reconciliation.** Adopt `test_plan.md` §3's finer test layout as the
+3. **Test-layout reconciliation.** Adopt `test_plan.md` §3's finer test layout as the
    authority and (optionally) update `architecture.md` §5's illustrative list to match when
    `test/` is created.
+
+**Deferred to Phase 9 (do not block Phase 1):**
+
+- **macOS packaging shape.** Per-arch wheels (arm64 + x64 separately) vs a single
+  `universal2` wheel.
+- **Linux wheel baseline.** Which `manylinux` standard (e.g. `manylinux_2_28`) defines the
+  glibc floor for release wheels.
+
+**Resolved during this revision (no longer open):**
+
+- Python 3.14 — **included** in the M1 matrix (§6).
+- ICU/`Intl` — **disabled** in M1; no `icudtl.dat` shipped (§5.5).
+- `depot_tools`/environment reproducibility — pinned commit + container digest,
+  `DEPOT_TOOLS_UPDATE=0` (§5.1).
+- License claim — replaced with a generate-and-audit-from-`DEPS` action (§3).
 
 ### 10.3 Phase 1 entry conditions
 
 Phase 1 (build/package skeleton) may start once the user approves this document. Phase 1
 requires only items that do **not** depend on the Windows/macOS open questions:
 
-- Approval of the pinned V8 revision (§2) and the static-monolith model (§4).
-- Approval of the Python range and per-version wheel model (§6).
+- Approval of the pinned V8 revision and its "last-generation stable baseline" positioning
+  (§2) and the static-monolith model (§4).
+- Approval of the Python range **3.11–3.14** and per-version wheel model (§6).
 - Agreement that Phase 1 builds the empty extension skeleton on **Windows 11 x64 natively**
   (no V8, no `JSContext`, no V8 init, no JS execution), producing a compilable, installable,
   importable package with distinct package/V8 version metadata sources.
 
-The Windows-toolchain and macOS-packaging open questions do **not** block Phase 1 because
-Phase 1 links no V8; they must be resolved before Phase 2 (EngineRuntime, first real V8
-link) on those platforms.
+The Windows-toolchain spike, the ICU/`Intl` scope decision, and the Phase-9 packaging
+questions (macOS `universal2`, `manylinux` baseline) do **not** block Phase 1 because
+Phase 1 links no V8. The Windows ABI spike and any i18n reversal must be resolved before
+Phase 2 (EngineRuntime, first real V8 link) on the affected platforms.
