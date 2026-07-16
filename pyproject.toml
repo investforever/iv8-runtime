@@ -6,7 +6,8 @@
 # for full reproducibility (see docs/dependency_strategy.md §7).
 requires = [
     "scikit-build-core>=0.10,<2",
-    "pybind11>=2.12,<3",
+    # pybind11 3.0 is the first release with official Python 3.14 / 3.14t support.
+    "pybind11>=3.0,<4",
 ]
 build-backend = "scikit_build_core.build"
 
