@@ -1,9 +1,12 @@
 [build-system]
 # scikit-build-core injects CMake and Ninja on demand, so they are intentionally
 # NOT listed here (listing them triggers a scikit-build-core warning).
+# Upper bounds guard against breaking major releases during development. Release
+# CI must additionally pin exact versions via a lockfile or a fixed build image
+# for full reproducibility (see docs/dependency_strategy.md §7).
 requires = [
-    "scikit-build-core>=0.10",
-    "pybind11>=2.12",
+    "scikit-build-core>=0.10,<2",
+    "pybind11>=2.12,<3",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -15,6 +18,9 @@ name = "iv8"
 version = "0.0.1"
 description = "Python/V8 interoperability runtime (M1 Phase 1 build skeleton; V8 not yet linked)."
 requires-python = ">=3.11,<3.15"
+# Project's own license (SPDX), independent of V8's BSD-3-Clause.
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "iv8-runtime" }]
 keywords = ["v8", "javascript", "pybind11"]
 classifiers = [
@@ -43,3 +49,6 @@ build-type = "Release"
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
+# Keep the pytest cache out of the (possibly read-only) source root; data/ is
+# already git-ignored.
+cache_dir = "data/pytest_cache"

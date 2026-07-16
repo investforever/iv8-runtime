@@ -5,13 +5,16 @@
 // These macros are injected by CMake from cmake/v8_pin.cmake. They describe the
 // pinned V8 revision the project will build against in a LATER phase. In the M1
 // Phase 1 skeleton, V8 is not linked or initialized, so these are informational
-// only. Fallback values keep the translation unit compilable if the definitions
-// are ever absent.
+// only.
+//
+// A missing definition means the build was misconfigured (cmake/v8_pin.cmake was
+// not applied). Fail the compile rather than silently producing a wheel that
+// reports an "unknown" pin.
 
 #ifndef IV8_PINNED_V8_VERSION
-#define IV8_PINNED_V8_VERSION "unknown"
+#error "IV8_PINNED_V8_VERSION is not defined; it must be injected by cmake/v8_pin.cmake"
 #endif
 
 #ifndef IV8_PINNED_V8_COMMIT
-#define IV8_PINNED_V8_COMMIT "unknown"
+#error "IV8_PINNED_V8_COMMIT is not defined; it must be injected by cmake/v8_pin.cmake"
 #endif
