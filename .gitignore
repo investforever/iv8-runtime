@@ -1,0 +1,35 @@
+# Downloaded V8 source trees, depot_tools, archives, build outputs, caches
+/data/
+/build/
+/_skbuild/
+/dist/
+/wheelhouse/
+*.egg-info/
+
+# CMake / scikit-build-core
+/CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Native build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.pdb
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
