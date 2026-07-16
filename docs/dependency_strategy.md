@@ -452,3 +452,74 @@ The Windows-toolchain spike, the ICU/`Intl` scope decision, and the Phase-9 pack
 questions (macOS `universal2`, `manylinux` baseline) do **not** block Phase 1 because
 Phase 1 links no V8. The Windows ABI spike and any i18n reversal must be resolved before
 Phase 2 (EngineRuntime, first real V8 link) on the affected platforms.
+
+---
+
+## 11. Phase 2 Entry Conditions
+
+Phase 1 is final-approved (checkpoint `73c79f7`). Phase 2 (`implementation_plan.md` §6,
+process-wide `EngineRuntime`) is the **first time V8 is actually built and linked**.
+Because that step is irreversible-to-un-learn and expensive, the following three
+prerequisites must be satisfied and signed off **before** Phase 2 implementation begins.
+Each lists concrete acceptance criteria and the decision it still needs.
+
+### EC-1 — Windows single-ABI validation spike
+
+**Goal:** prove that a CPython extension links a **clang-cl-built** `v8_monolith` under a
+single shared C++ STL + CRT ABI, per §5.4 (no libc++ on Windows).
+
+**Acceptance criteria:**
+- A minimal static library built with `is_clang=true`, `use_custom_libcxx=false`, `/MD`
+  (representative of the V8 monolith toolchain) links into a pybind11 extension built with
+  **clang-cl + MSVC STL + `/MD`**.
+- The extension imports in CPython and a `std::string`/`std::vector` value round-trips
+  across the boundary without linker or ABI errors.
+- The exact clang-cl version, MSVC STL version, and CRT flag are recorded in build config.
+
+**Decision needed:** switch the Phase 1 extension build from MSVC (`cl.exe`, current) to
+**clang-cl now**, or keep MSVC for non-V8 code and introduce clang-cl only when V8 is
+linked? (Recommendation: switch to clang-cl now so the toolchain is uniform before V8.)
+
+### EC-2 — Linux x86-64 V8 build environment
+
+**Goal:** a reproducible environment that produces `libv8_monolith.a` + headers from the
+pinned commit `209c9cea…` (`15.0.245.19`), per §5.1/§5.5.
+
+**Acceptance criteria:**
+- `depot_tools` checked out to a **pinned commit** with `DEPOT_TOOLS_UPDATE=0`.
+- V8 synced to the pinned commit via `gclient sync -D`; built with the §5.5 release
+  `args.gn` (monolithic, static, i18n off, `use_custom_libcxx=false`).
+- Build runs inside a container pinned by **image digest** (`@sha256:…`).
+- `libv8_monolith.a` + `include/` produced and cached under `data/`; a committed build
+  script reproduces it; build time and artifact size recorded.
+
+**Decision needed:** run the Linux build via **WSL2 installed on this Windows host**
+(large system change, like the earlier compiler install), a **Docker Desktop container**,
+or **CI-only** (no local Linux; rely on the CI runner)? Plus the base image to pin.
+
+### EC-3 — Multi-platform / multi-Python CI
+
+**Goal:** a CI matrix so every Phase-2+ change is validated across the support matrix
+(§6) rather than only on the local Python 3.12 / Windows box.
+
+**Acceptance criteria:**
+- CI config committed defining the matrix: {Linux x64, macOS arm64 + x64, Windows x64} ×
+  Python {3.11, 3.12, 3.13, 3.14}.
+- Jobs: configure + build (consuming the cached V8 monolith from EC-2), `pytest`, wheel
+  build + clean-install-outside-source-tree, and one Linux debug/ASan lane
+  (`test_plan.md` §15).
+- Bootstrap now on the V8-free Phase 1 skeleton: at minimum the **Linux x64 and Windows
+  x64** lanes go green; V8-linking lanes are enabled once EC-1/EC-2 land.
+- Release wheels via `cibuildwheel` (or equivalent), consistent with §7.
+
+**Decision needed:** CI provider (**GitHub Actions** assumed) and whether the repo will be
+pushed to a remote host — currently there is only a **local git repo, no remote**. A CI
+matrix needs a hosted repo + runners.
+
+### Gate
+
+Phase 2 implementation starts only after EC-1 passes (Windows ABI proven), EC-2 produces a
+cached monolith from the pinned commit, and EC-3's config is committed with the bootstrap
+lanes green. Partial completion may unblock platform-specific Phase 2 work (e.g. EC-2 alone
+unblocks the Linux EngineRuntime bring-up) but the full gate is required before Phase 2 is
+considered entered on all platforms.
