@@ -489,41 +489,61 @@ scikit-build-core override in `pyproject.toml`
 static-lib↔extension boundary) is validated on this host. This is the exact linkage shape
 the future clang-cl `v8_monolith` will use.
 
-### EC-2 — Linux x86-64 V8 build environment
+### EC-2 — Linux x86-64 V8 build environment — 🟡 IN PROGRESS (blocked on reboot)
 
 **Goal:** a reproducible environment that produces `libv8_monolith.a` + headers from the
 pinned commit `209c9cea…` (`15.0.245.19`), per §5.1/§5.5.
 
-**Acceptance criteria:**
-- `depot_tools` checked out to a **pinned commit** with `DEPOT_TOOLS_UPDATE=0`.
-- V8 synced to the pinned commit via `gclient sync -D`; built with the §5.5 release
-  `args.gn` (monolithic, static, i18n off, `use_custom_libcxx=false`).
-- Build runs inside a container pinned by **image digest** (`@sha256:…`).
-- `libv8_monolith.a` + `include/` produced and cached under `data/`; a committed build
-  script reproduces it; build time and artifact size recorded.
+**Decision (made):** run the Linux build via **WSL2 on this Windows host**.
 
-**Decision needed:** run the Linux build via **WSL2 installed on this Windows host**
-(large system change, like the earlier compiler install), a **Docker Desktop container**,
-or **CI-only** (no local Linux; rely on the CI runner)? Plus the base image to pin.
+**Status (2026-07-16):**
+- WSL default version set to 2; `VirtualMachinePlatform` and
+  `Microsoft-Windows-Subsystem-Linux` optional features enabled via elevated
+  `wsl --install --no-distribution` + `Enable-WindowsOptionalFeature` (both exit 0).
+- Host CPU Intel i7-14700F; `systeminfo` reports "a hypervisor has been detected", so
+  hardware virtualization is available.
+- **BLOCKER: a system reboot is required** to activate the Virtual Machine Platform before
+  WSL2 can start. This cannot be done autonomously — the user must reboot.
 
-### EC-3 — Multi-platform / multi-Python CI
+**Remaining after reboot:**
+1. `wsl --install -d Ubuntu` (or another pinned distro) and create the UNIX user.
+2. Fetch `depot_tools`, check it out to a **pinned commit**, set `DEPOT_TOOLS_UPDATE=0`.
+3. `fetch v8` → check out `209c9cea…` → `gclient sync -D`.
+4. `gn gen` with the §5.5 release `args.gn` (monolithic, static, i18n off,
+   `use_custom_libcxx=false`) → `ninja v8_monolith`.
+5. Produce/cache `libv8_monolith.a` + `include/` under `data/`; commit the build script;
+   record build time and artifact size. (Optional: pin a container image by digest inside
+   WSL for extra reproducibility.)
+
+**Acceptance criteria (unchanged):** reproducible `libv8_monolith.a` from the pinned commit
+with `DEPOT_TOOLS_UPDATE=0` and a committed build script.
+
+### EC-3 — Multi-platform / multi-Python CI — 🟡 CONFIG WRITTEN (push pending)
 
 **Goal:** a CI matrix so every Phase-2+ change is validated across the support matrix
 (§6) rather than only on the local Python 3.12 / Windows box.
 
-**Acceptance criteria:**
-- CI config committed defining the matrix: {Linux x64, macOS arm64 + x64, Windows x64} ×
-  Python {3.11, 3.12, 3.13, 3.14}.
-- Jobs: configure + build (consuming the cached V8 monolith from EC-2), `pytest`, wheel
-  build + clean-install-outside-source-tree, and one Linux debug/ASan lane
-  (`test_plan.md` §15).
-- Bootstrap now on the V8-free Phase 1 skeleton: at minimum the **Linux x64 and Windows
-  x64** lanes go green; V8-linking lanes are enabled once EC-1/EC-2 land.
-- Release wheels via `cibuildwheel` (or equivalent), consistent with §7.
+**Decision (made):** **GitHub Actions**, repo to be pushed to a remote.
 
-**Decision needed:** CI provider (**GitHub Actions** assumed) and whether the repo will be
-pushed to a remote host — currently there is only a **local git repo, no remote**. A CI
-matrix needs a hosted repo + runners.
+**Status (2026-07-16):**
+- Bootstrap workflow committed at `.github/workflows/ci.yml`: matrix
+  {`ubuntu-latest`, `windows-latest`, `macos-14` (arm64), `macos-13` (x64)} ×
+  Python {3.11, 3.12, 3.13, 3.14}. Each lane builds the wheel (PEP 517), installs it,
+  imports `iv8` from outside the source tree, asserts version separation + `_v8_linked is
+  False`, and runs `pytest`. Windows adds clang-cl to PATH (§5.4 / EC-1).
+- **BLOCKER: no git remote is configured** (local repo only). The workflow cannot run until
+  the repo is pushed to a hosted GitHub remote. Creating/authorizing that remote is a
+  user action.
+
+**Remaining:**
+1. User creates/authorizes a GitHub remote and it is pushed (`git remote add … && git push`).
+2. Confirm the bootstrap lanes (at least Linux x64 + Windows x64) go green on the V8-free
+   skeleton.
+3. Later: add V8-linking lanes (consume the cached monolith from EC-2), a Linux debug/ASan
+   lane (`test_plan.md` §15), and release wheels via `cibuildwheel` (§7).
+
+**Acceptance criteria (unchanged):** committed CI config for the full matrix with the
+bootstrap lanes green.
 
 ### Gate
 

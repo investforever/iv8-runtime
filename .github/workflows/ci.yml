@@ -1,0 +1,54 @@
+name: CI
+
+# Bootstrap CI for the M1 build skeleton. V8 is NOT linked yet, so these lanes
+# only build/install/test the placeholder extension across the support matrix
+# (docs/dependency_strategy.md §6, §11 EC-3). V8-linking lanes and the
+# debug/ASan lane are added once EC-2 (Linux V8 build environment) lands.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # x86-64 everywhere + macOS arm64 (macos-14) and macOS x64 (macos-13).
+        os: [ubuntu-latest, windows-latest, macos-14, macos-13]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Windows must build with clang-cl to match the future v8_monolith ABI
+      # (§5.4 / EC-1). LLVM is preinstalled on the windows-latest image.
+      - name: Put clang-cl on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\LLVM\bin"
+
+      - name: Build wheel (PEP 517)
+        run: python -m pip wheel . --no-deps -w dist
+
+      - name: Install wheel and test outside the source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          WHL=$(ls dist/*.whl)
+          python -m pip install "$WHL" "pytest>=7"
+          # cd out of the checkout so `import iv8` resolves to the installed wheel.
+          cd "$RUNNER_TEMP"
+          python -c "import iv8; assert 'site-packages' in iv8.__file__, iv8.__file__; print('pkg', iv8.__version__, '| v8', iv8._v8_version, '| linked', iv8._v8_linked); assert iv8.__version__ != iv8._v8_version; assert iv8._v8_linked is False"
+          python -m pytest "$GITHUB_WORKSPACE/test" -v
