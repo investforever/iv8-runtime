@@ -70,12 +70,29 @@ is_component_build = false
 v8_use_external_startup_data = false
 v8_enable_i18n_support = false
 use_custom_libcxx = false
+# The V8 sandbox (default on) asserts it requires the hardened custom libc++
+# (use_safe_libcxx), which conflicts with use_custom_libcxx=false. M1 is not a
+# security sandbox (architecture §10), so the sandbox is disabled to keep the
+# shared-STL ABI. See docs/dependency_strategy.md §5.5.
+v8_enable_sandbox = false
+# With use_custom_libcxx=false, V8's bundled Debian-bullseye sysroot ships a
+# libstdc++ too old for V8 15.0's C++20 use (std::bit_cast, <source_location>).
+# Use the host toolchain's modern libstdc++ instead (Ubuntu 24.04 -> g++ 13).
+use_sysroot = false
+# Bypass -Werror in third_party/llvm-libc (harmless -Wshift-count-negative in
+# its _Float16 path) so the embedder build is not blocked by upstream warnings.
+treat_warnings_as_errors = false
 symbol_level = 1
 EOF
-gn gen "$OUT_SUBDIR"
+# Use V8's synced buildtools gn + third_party ninja directly. The depot_tools
+# gn/ninja WRAPPERS require a CIPD self-bootstrap (python3_bin_reldir.txt) that
+# DEPOT_TOOLS_UPDATE=0 deliberately blocks, so we bypass them.
+GN="$WORK/v8/buildtools/linux64/gn"
+NINJA="$WORK/v8/third_party/ninja/ninja"
+"$GN" gen "$OUT_SUBDIR"
 
 echo "==> [5/5] build v8_monolith"
-ninja -C "$OUT_SUBDIR" v8_monolith
+"$NINJA" -C "$OUT_SUBDIR" v8_monolith
 
 LIB="$WORK/v8/$OUT_SUBDIR/obj/libv8_monolith.a"
 echo "-------------------------------------------------------------"

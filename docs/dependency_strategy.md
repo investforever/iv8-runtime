@@ -259,11 +259,33 @@ is_component_build = false
 v8_use_external_startup_data = false  # embed ONLY the startup snapshot into the binary
 v8_enable_i18n_support = false        # ICU OFF for M1 -> no icudtl.dat, no Intl guarantee
 use_custom_libcxx = false             # share the platform C++ std library ABI
+v8_enable_sandbox = false             # REQUIRED with use_custom_libcxx=false (see note)
+use_sysroot = false                   # Linux: use host libstdc++ (C++20), not old sysroot
+treat_warnings_as_errors = false      # bypass upstream -Werror in third_party/llvm-libc
 symbol_level = 1
-# Pointer compression + sandbox are left at the branch-head defaults so we stay on
-# V8's tested path. This caps per-isolate heap (~4 GB) and MUST be recorded in build
+# Pointer compression is left at the branch-head default (on) so we stay on V8's
+# tested path; this caps per-isolate heap (~4 GB) and MUST be recorded in build
 # metadata because it is an ABI-affecting choice on upgrade.
 ```
+
+> **Validated on V8 15.0.245.19 in WSL2 Ubuntu 24.04 (EC-2, §11).** The last three
+> args above were required to make the monolith build succeed with a shared STL:
+> `use_sysroot=false` is needed because V8's bundled Debian-bullseye sysroot ships a
+> libstdc++ too old for V8 15.0's C++20 usage (`std::bit_cast`, `<source_location>`)
+> once `use_custom_libcxx=false` selects libstdc++; the host g++ 13 libstdc++
+> provides them. `treat_warnings_as_errors=false` clears a harmless upstream
+> `-Wshift-count-negative` in `third_party/llvm-libc`. Result: `libv8_monolith.a`
+> ≈ 217 MB.
+
+> **Sandbox note (discovered during EC-2 on V8 15.0.245.19):** the V8 sandbox
+> (`v8_enable_sandbox`, default on when pointer compression is on) asserts
+> `!v8_enable_sandbox || use_safe_libcxx` ("the sandbox requires libc++
+> hardening"). Because M1 sets `use_custom_libcxx=false` to share one STL/CRT ABI
+> across the V8↔extension boundary (§5.4), the hardened custom libc++ is absent, so
+> the sandbox **must be disabled**. This is acceptable: M1 is an embedding API, not
+> a security sandbox (architecture §10). Re-enabling the sandbox later would require
+> switching to V8's custom hardened libc++ and re-validating the embedding ABI — a
+> §9 upgrade-level change.
 
 **Debug / assertions build (one development platform only, per `test_plan.md` §4):**
 
@@ -489,34 +511,36 @@ scikit-build-core override in `pyproject.toml`
 static-lib↔extension boundary) is validated on this host. This is the exact linkage shape
 the future clang-cl `v8_monolith` will use.
 
-### EC-2 — Linux x86-64 V8 build environment — 🟡 IN PROGRESS (blocked on reboot)
+### EC-2 — Linux x86-64 V8 build environment — ✅ SATISFIED (2026-07-16)
 
 **Goal:** a reproducible environment that produces `libv8_monolith.a` + headers from the
 pinned commit `209c9cea…` (`15.0.245.19`), per §5.1/§5.5.
 
-**Decision (made):** run the Linux build via **WSL2 on this Windows host**.
+**Decision (made):** Linux build via **WSL2 on this Windows host**.
 
-**Status (2026-07-16):**
-- WSL default version set to 2; `VirtualMachinePlatform` and
-  `Microsoft-Windows-Subsystem-Linux` optional features enabled via elevated
-  `wsl --install --no-distribution` + `Enable-WindowsOptionalFeature` (both exit 0).
-- Host CPU Intel i7-14700F; `systeminfo` reports "a hypervisor has been detected", so
-  hardware virtualization is available.
-- **BLOCKER: a system reboot is required** to activate the Virtual Machine Platform before
-  WSL2 can start. This cannot be done autonomously — the user must reboot.
+**Result / recorded evidence:**
+- Environment: WSL2 (2.7.10.0, kernel 6.18) + **Ubuntu 24.04.4 LTS**, host Intel
+  i7-14700F (28 threads, 31 GB RAM). VM Platform enabled + reboot completed.
+- `depot_tools` pinned at commit **`99d255e39ab1d5a6a56fa19605bef619b3c0e31b`**,
+  `DEPOT_TOOLS_UPDATE=0`.
+- V8 fetched and checked out to the pinned commit `209c9cea…`; `gclient sync -D`
+  completed (one transient sub-repo retry, resolved on re-run).
+- Built with `tools/build_v8_linux.sh` using the §5.5 args (monolithic, static, i18n off,
+  `use_custom_libcxx=false`, `v8_enable_sandbox=false`, `use_sysroot=false`,
+  `treat_warnings_as_errors=false`). gn: 826 targets; ninja: 1869/1869.
+- **Artifact:** `libv8_monolith.a` = **227,031,014 bytes (~217 MB)** + 112 public
+  headers (incl. `v8.h`, `libplatform/libplatform.h`), cached at repo
+  `data/v8/{lib,include}` (git-ignored) with `data/v8/BUILD_INFO.txt`.
+- Build performed in WSL-native ext4 (`/root/iv8-v8-build`, ~5.5 GB source tree) to avoid
+  drvfs slowness; only the artifact + headers are copied to `data/` on D:.
 
-**Remaining after reboot:**
-1. `wsl --install -d Ubuntu` (or another pinned distro) and create the UNIX user.
-2. Fetch `depot_tools`, check it out to a **pinned commit**, set `DEPOT_TOOLS_UPDATE=0`.
-3. `fetch v8` → check out `209c9cea…` → `gclient sync -D`.
-4. `gn gen` with the §5.5 release `args.gn` (monolithic, static, i18n off,
-   `use_custom_libcxx=false`) → `ninja v8_monolith`.
-5. Produce/cache `libv8_monolith.a` + `include/` under `data/`; commit the build script;
-   record build time and artifact size. (Optional: pin a container image by digest inside
-   WSL for extra reproducibility.)
+**Notes for Phase 2:** the monolith is built with clang + libstdc++ (host g++ 13). Per
+§5.4, the Linux extension must be compiled with the **same** clang + libstdc++ to share one
+ABI. (Windows uses clang-cl + MSVC STL — EC-1.) A container-image-digest pin (§5.1) is
+still optional-future for extra reproducibility beyond the pinned commits.
 
-**Acceptance criteria (unchanged):** reproducible `libv8_monolith.a` from the pinned commit
-with `DEPOT_TOOLS_UPDATE=0` and a committed build script.
+**Acceptance:** ✅ reproducible `libv8_monolith.a` from the pinned commit,
+`DEPOT_TOOLS_UPDATE=0`, committed build script (`tools/build_v8_linux.sh`).
 
 ### EC-3 — Multi-platform / multi-Python CI — 🟡 CONFIG WRITTEN (push pending)
 
