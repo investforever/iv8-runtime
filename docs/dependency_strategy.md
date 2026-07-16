@@ -463,22 +463,31 @@ Because that step is irreversible-to-un-learn and expensive, the following three
 prerequisites must be satisfied and signed off **before** Phase 2 implementation begins.
 Each lists concrete acceptance criteria and the decision it still needs.
 
-### EC-1 — Windows single-ABI validation spike
+### EC-1 — Windows single-ABI validation spike — ✅ SATISFIED (2026-07-16)
 
 **Goal:** prove that a CPython extension links a **clang-cl-built** `v8_monolith` under a
 single shared C++ STL + CRT ABI, per §5.4 (no libc++ on Windows).
 
-**Acceptance criteria:**
-- A minimal static library built with `is_clang=true`, `use_custom_libcxx=false`, `/MD`
-  (representative of the V8 monolith toolchain) links into a pybind11 extension built with
-  **clang-cl + MSVC STL + `/MD`**.
-- The extension imports in CPython and a `std::string`/`std::vector` value round-trips
-  across the boundary without linker or ABI errors.
-- The exact clang-cl version, MSVC STL version, and CRT flag are recorded in build config.
+**Decision (made):** the skeleton extension build was switched from MSVC `cl.exe` to
+**clang-cl now** (uniform toolchain before V8). Implemented as a Windows-scoped
+scikit-build-core override in `pyproject.toml`
+(`CMAKE_C_COMPILER=clang-cl`, `CMAKE_CXX_COMPILER=clang-cl`); Linux/macOS keep clang.
 
-**Decision needed:** switch the Phase 1 extension build from MSVC (`cl.exe`, current) to
-**clang-cl now**, or keep MSVC for non-V8 code and introduce clang-cl only when V8 is
-linked? (Recommendation: switch to clang-cl now so the toolchain is uniform before V8.)
+**Result / recorded evidence:**
+- Toolchain: **LLVM/clang-cl 22.1.8** (`Target: x86_64-pc-windows-msvc`), MSVC BuildTools
+  14.44.35207, C++ standard library **MSVC STL (MSVCP140.dll)**, CRT **`/MD`** (CMake
+  default `MultiThreadedDLL`).
+- The real `iv8._core` extension rebuilt with clang-cl: imports, all 9 pytest pass, and its
+  import table shows `MSVCP140.dll` + `VCRUNTIME140.dll` (dynamic CRT), **no libc++**.
+- Spike (throwaway, built under `vcvars64` + clang-cl): a **static library**
+  (`spikelib.lib`, simulating `v8_monolith`) returning `std::string` and
+  `std::vector<int>` was linked into a separate pybind11 module; both values round-trip
+  correctly static-lib → extension → Python. The module links `MSVCP140`/`VCRUNTIME140`
+  only. No linker or ABI errors.
+
+**Conclusion:** the §5.4 single-ABI plan (clang-cl + MSVC STL + `/MD` across the
+static-lib↔extension boundary) is validated on this host. This is the exact linkage shape
+the future clang-cl `v8_monolith` will use.
 
 ### EC-2 — Linux x86-64 V8 build environment
 

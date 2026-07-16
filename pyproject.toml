@@ -48,6 +48,15 @@ wheel.packages = ["python/iv8"]
 version = ">=3.15"
 build-type = "Release"
 
+# Windows uses clang-cl (not MSVC cl.exe) so the extension shares a single C++
+# STL + CRT ABI with the future clang-cl-built v8_monolith (see
+# docs/dependency_strategy.md §5.4 and §11 EC-1). Linux/macOS keep their default
+# clang; this override is scoped to Windows only.
+[[tool.scikit-build.overrides]]
+if.platform-system = "win32"
+cmake.define.CMAKE_C_COMPILER = "clang-cl"
+cmake.define.CMAKE_CXX_COMPILER = "clang-cl"
+
 [tool.pytest.ini_options]
 testpaths = ["test"]
 # Keep the pytest cache out of the (possibly read-only) source root; data/ is
