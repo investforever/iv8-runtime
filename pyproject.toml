@@ -1,0 +1,45 @@
+[build-system]
+# scikit-build-core injects CMake and Ninja on demand, so they are intentionally
+# NOT listed here (listing them triggers a scikit-build-core warning).
+requires = [
+    "scikit-build-core>=0.10",
+    "pybind11>=2.12",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "iv8"
+# Package version. This is the SEMANTIC PACKAGE version and is sourced ONLY here
+# (project metadata). It is intentionally unrelated to the pinned V8 revision,
+# which lives in cmake/v8_pin.cmake and is exposed separately as iv8._v8_version.
+version = "0.0.1"
+description = "Python/V8 interoperability runtime (M1 Phase 1 build skeleton; V8 not yet linked)."
+requires-python = ">=3.11,<3.15"
+authors = [{ name = "iv8-runtime" }]
+keywords = ["v8", "javascript", "pybind11"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: C++",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.scikit-build]
+# Pin the minimum scikit-build-core to what build-system.requires declares.
+minimum-version = "build-system.requires"
+# Keep build trees out of the source tree (also ignored by .gitignore).
+build-dir = "build/{wheel_tag}"
+# The importable Python package lives under python/iv8 (src-style layout).
+wheel.packages = ["python/iv8"]
+
+[tool.scikit-build.cmake]
+version = ">=3.15"
+build-type = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["test"]

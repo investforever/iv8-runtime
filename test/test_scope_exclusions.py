@@ -1,0 +1,38 @@
+"""Phase 1 scope-guard tests.
+
+These assert the skeleton has NOT prematurely grown any M1+ runtime surface or
+browser API. They protect against accidental scope expansion. See
+docs/test_plan.md §13 and docs/architecture.md §2.
+"""
+
+import iv8
+
+# Symbols that must NOT exist yet in the Phase 1 skeleton.
+_FORBIDDEN = [
+    # M1 runtime surface (arrives in later phases, not Phase 1).
+    "JSContext",
+    "JSValue",
+    "JSUndefined",
+    "JSError",
+    "JSConversionError",
+    "JSContextDisposedError",
+    "JSContextBusyError",
+    "eval",
+    # Browser / out-of-scope APIs that must never appear.
+    "window",
+    "document",
+    "navigator",
+    "location",
+    "fetch",
+    "setTimeout",
+]
+
+
+def test_no_runtime_or_browser_symbols_exported():
+    present = [name for name in _FORBIDDEN if hasattr(iv8, name)]
+    assert present == [], f"unexpected symbols leaked into iv8: {present}"
+
+
+def test_no_callback_registration_api():
+    for name in ("register", "register_callback", "expose", "bind_python"):
+        assert not hasattr(iv8, name)
