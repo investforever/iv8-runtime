@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
 
-# M1 Phase 2. The native module exposes build/version metadata and, when
-# IV8_LINK_V8 is ON, links the pinned V8 monolith and initializes V8's
-# process-wide platform (EngineRuntime). No isolate / context / JSContext /
-# JSValue / eval behavior exists yet (Phase 3+).
+# iv8 native extension. The module exposes build/version metadata and, when
+# IV8_LINK_V8 is ON, links the pinned V8 monolith, initializes V8's process-wide
+# platform (EngineRuntime), and provides the JSContext lifecycle (IsolateHost /
+# ContextHost). No eval / value conversion / JSValue behavior exists yet
+# (Phase 4+).
 
 project(iv8 LANGUAGES CXX)
 

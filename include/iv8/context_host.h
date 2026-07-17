@@ -1,6 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -57,23 +59,29 @@ private:
 
     std::unique_ptr<IsolateHost> isolate_host_;
     v8::Global<v8::Context> context_;
-    bool disposed_ = false;
-    bool busy_ = false;
+    // Serializes operations on this context. A held lock means an operation is
+    // active; overlapping attempts (including from other threads once eval
+    // releases the GIL) fail fast with ContextBusyError via try_lock.
+    std::mutex op_mutex_;
+    // Lock-free readable status (the authoritative check happens under the lock
+    // in OperationScope). Atomic so the disposed() getter is race-free.
+    std::atomic<bool> disposed_{false};
 };
 
-// RAII guard for a single native operation on a ContextHost. Rejects use after
-// disposal and overlapping operations, and marks the context busy for the
-// operation's duration. Covers every native operation entry point.
+// RAII guard for a single native operation on a ContextHost. Non-blocking:
+// try-locks the context's operation mutex and rejects an overlapping operation
+// with ContextBusyError (never serializes/blocks), and rejects use after
+// disposal with ContextDisposedError. Holds the lock for the operation's
+// lifetime. Covers every native operation entry point.
 class OperationScope {
 public:
     explicit OperationScope(ContextHost& host);
-    ~OperationScope();
 
     OperationScope(const OperationScope&) = delete;
     OperationScope& operator=(const OperationScope&) = delete;
 
 private:
-    ContextHost& host_;
+    std::unique_lock<std::mutex> lock_;
 };
 
 }  // namespace iv8

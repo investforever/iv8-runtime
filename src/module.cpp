@@ -12,7 +12,7 @@ namespace py = pybind11;
 
 // iv8 native core.
 //
-// Phase 2 exposes STATE ONLY (no control API — no init()/shutdown()):
+// Module-level state (no control API — no init()/shutdown()):
 //   * _v8_version         : compile-time pinned V8 revision (build metadata)
 //   * _v8_commit          : compile-time pinned V8 commit
 //   * _v8_linked          : bool, whether this build links the V8 monolith
@@ -21,13 +21,13 @@ namespace py = pybind11;
 // When built with IV8_WITH_V8, V8's process-wide platform is initialized at
 // MODULE IMPORT time. If that initialization fails, the exception propagates and
 // `import iv8` fails with a Python error — there is no "linked but not
-// initialized" half state.
-//
-// No JSContext / JSValue / eval / isolate / context exists yet (Phase 3+).
+// initialized" half state. In V8-linked builds the native Context type is also
+// registered (see register_context). No eval / value conversion / JSValue yet
+// (Phase 4+).
 PYBIND11_MODULE(_core, module) {
     module.doc() =
-        "iv8 native core. Phase 2: process-wide V8 platform init (EngineRuntime) "
-        "only; no isolate/context/eval.";
+        "iv8 native core: process-wide V8 platform init (EngineRuntime) and the "
+        "native Context lifecycle type; no eval/value-conversion yet.";
 
     // Pinned V8 revision metadata, injected at build time from cmake/v8_pin.cmake.
     module.attr("_v8_version") = py::str(IV8_PINNED_V8_VERSION);
