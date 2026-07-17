@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Modern libstdc++ (C++20) for the extension TUs, matching the monolith build.
+dnf install -y gcc-toolset-14 >/dev/null 2>&1 || dnf install -y gcc-toolset-13 >/dev/null 2>&1 || true
 GCC_TOOLSET_ROOT=""
 for ts in 14 13; do
   if [ -f "/opt/rh/gcc-toolset-$ts/enable" ]; then
@@ -20,6 +21,14 @@ for ts in 14 13; do
     break
   fi
 done
+# Same explicit libstdc++ wiring as the monolith build (clang won't scan /opt/rh).
+if [ -n "$GCC_TOOLSET_ROOT" ]; then
+  CXXV="$(ls -d "$GCC_TOOLSET_ROOT"/include/c++/* 2>/dev/null | sort -V | tail -1)"
+  TRIP="$(basename "$(ls -d "$CXXV"/*-linux* 2>/dev/null | head -1)")"
+  export CPLUS_INCLUDE_PATH="$CXXV:$CXXV/$TRIP:$CXXV/backward${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+  export LIBRARY_PATH="$GCC_TOOLSET_ROOT/lib/gcc/$TRIP/$(basename "$CXXV"):$GCC_TOOLSET_ROOT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  export LD_LIBRARY_PATH="$GCC_TOOLSET_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 TC="$ROOT/data/v8/toolchain"
 export PATH="$TC/bin:$PATH"  # so -fuse-ld=lld finds ld.lld

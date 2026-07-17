@@ -36,6 +36,17 @@ for ts in 14 13; do
 done
 dnf install -y git curl which python3 >/dev/null 2>&1 || true
 
+# V8's bundled clang does NOT scan /opt/rh, so `source enable` alone leaves it
+# using the base GCC 8 headers (no C++20 -> "'version' file not found"). Point
+# clang at the gcc-toolset libstdc++ explicitly via env (honored by clang).
+GT="/opt/rh/gcc-toolset-$ts/root/usr"
+CXXV="$(ls -d "$GT"/include/c++/* 2>/dev/null | sort -V | tail -1)"
+TRIP="$(basename "$(ls -d "$CXXV"/*-linux* 2>/dev/null | head -1)")"
+export CPLUS_INCLUDE_PATH="$CXXV:$CXXV/$TRIP:$CXXV/backward${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+export LIBRARY_PATH="$GT/lib/gcc/$TRIP/$(basename "$CXXV"):$GT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$GT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+echo "    CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH"
+
 cd "$WORK"
 export DEPOT_TOOLS_UPDATE=0
 export DEPOT_TOOLS_METRICS=0
