@@ -1,25 +1,22 @@
 name: release-linux
 
 # Phase 9 / Strategy A: build distributable manylinux_2_28 wheels for Linux
-# x86-64 (cp311-cp314) with V8 linked. Manual trigger only (the V8 build is
-# long); the monolith is cached across runs.
-#
-# TODO(hardening): pin the manylinux image by @sha256 digest (dependency_strategy
-# §5.1) once a digest is chosen.
+# x86-64 (cp311-cp314) with V8 linked. Triggered by a version tag (real release)
+# or manually. The V8 monolith is cached across runs.
 
 on:
   workflow_dispatch:
-  # Bring-up trigger: run when the Phase 9 build inputs change (no gh/token
-  # available locally to dispatch manually). Tighten to tags for real releases.
   push:
-    paths:
-      - 'tools/build_v8_manylinux.sh'
-      - 'tools/build_linux_wheels.sh'
-      - '.github/workflows/release-linux.yml'
-      - 'cmake/v8_pin.cmake'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # create a GitHub Release and attach wheels on tag builds
 
 env:
-  MANYLINUX_IMAGE: quay.io/pypa/manylinux_2_28_x86_64
+  # Pinned by digest for reproducibility (dependency_strategy.md §5.1).
+  # quay.io/pypa/manylinux_2_28_x86_64 (resolved 2026-07-17).
+  MANYLINUX_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:b04887b645dde99b9e955aeae3ff4da414992d0bd88259f046295b56361c5614
 
 jobs:
   linux-wheels:
@@ -47,13 +44,22 @@ jobs:
             bash /io/tools/build_linux_wheels.sh
           sudo chown -R "$(id -u):$(id -g)" wheelhouse dist || true
 
-      - name: Show wheel metadata
+      - name: Show wheel + license metadata
         run: |
           ls -la wheelhouse
           cat data/v8/BUILD_INFO.txt
+          echo "--- bundled licenses ---"
+          ls -la data/v8/licenses || echo "(none)"
 
       - uses: actions/upload-artifact@v4
         with:
           name: iv8-linux-manylinux2_28-wheels
           path: wheelhouse/*.whl
           if-no-files-found: error
+
+      - name: Publish GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: wheelhouse/*.whl
+          generate_release_notes: true
