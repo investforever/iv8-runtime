@@ -101,12 +101,16 @@ def _nested_arrays(n: int) -> str:
 @on_only
 def test_depth_at_limit_succeeds():
     with iv8.JSContext() as ctx:
-        # 65 arrays occupy depths 0..64 (all <= 64): allowed.
+        # 65 arrays occupy depths 0..64 (all <= 64): allowed. The innermost is [].
         value = ctx.eval(_nested_arrays(65), to_py=True)
+        assert isinstance(value, list)
         depth = 0
         while isinstance(value, list) and value:
             value = value[0]
             depth += 1
+        # Descended through the deepest (depth-64) container down to the empty [].
+        assert depth == 64
+        assert value == []
 
 
 @on_only
