@@ -208,6 +208,19 @@ the V8 pin; none of the three may drift silently. CI caches the built monolith p
 - Set `use_custom_libcxx=false` so V8 uses the system C++ standard library, so std types
   crossing the V8↔extension boundary share one ABI. The extension is then compiled with
   the same standard library (libstdc++ on typical Linux).
+- **The extension MUST be built with V8's bundled clang + lld, not GNU g++/ld**
+  (validated in Phase 2, EC-2/§11). Two reasons: (1) the monolith's object files use
+  experimental **CREL relocations** that GNU `ld` (binutils) cannot link — only `lld` can;
+  (2) linking is a single-toolchain concern, mirroring the Windows clang-cl rule (§5.4).
+  Pass the toolchain to the extension build via `CMAKE_ARGS`
+  (`-DCMAKE_C_COMPILER=<v8>/clang -DCMAKE_CXX_COMPILER=<v8>/clang++`) and
+  `-DCMAKE_*_LINKER_FLAGS=-fuse-ld=lld`; the compiler lives at
+  `<v8-src>/third_party/llvm-build/Release+Asserts/bin`.
+- The monolith is built with `v8_monolithic_for_shared_library=true` (§5.5), which defines
+  `V8_TLS_USED_IN_LIBRARY` so V8 hides its `thread_local` globals behind NOINLINE getters
+  and uses a `local-dynamic` TLS model — linkable into a `dlopen`'d extension `.so`.
+  (A plain `-ftls-model` flag does NOT work: V8 hardcodes the model with a `tls_model`
+  attribute unless this arg is set.)
 - For portable wheels, the release build eventually targets a `manylinux` container so the
   glibc floor is controlled (Phase 9 concern; not required for local bring-up).
 
@@ -254,10 +267,12 @@ does not block the V8-free Phase 1 skeleton.
 is_debug = false
 target_cpu = "x64"                    # or "arm64" on Apple Silicon
 v8_monolithic = true
+v8_monolithic_for_shared_library = true  # TLS usable in a dlopen'd .so (§5.2)
 v8_static_library = true
 is_component_build = false
 v8_use_external_startup_data = false  # embed ONLY the startup snapshot into the binary
 v8_enable_i18n_support = false        # ICU OFF for M1 -> no icudtl.dat, no Intl guarantee
+v8_enable_temporal_support = false    # drop the Rust temporal_rs dep (see note)
 use_custom_libcxx = false             # share the platform C++ std library ABI
 v8_enable_sandbox = false             # REQUIRED with use_custom_libcxx=false (see note)
 use_sysroot = false                   # Linux: use host libstdc++ (C++20), not old sysroot
@@ -305,6 +320,12 @@ Notes:
 - `v8_use_external_startup_data=false` embeds **only the V8 startup snapshot**
   (`snapshot_blob`) into the binary. It does **not** embed ICU data — the two are
   independent. With ICU off there is no ICU data to embed or ship at all.
+- **Temporal is disabled** (`v8_enable_temporal_support=false`). V8 15.0 implements
+  Temporal via the Rust crates `temporal_rs`/`temporal_capi`, whose archive is not merged
+  into `libv8_monolith.a` (leaving undefined `temporal_rs_*` symbols at link/load). M1 does
+  not need Temporal (date/Intl are out of scope), so disabling it both fixes the link and
+  removes the Rust dependency. Re-enabling later means bundling the Rust archives + Rust
+  std — a deliberate §9 upgrade-level change.
 - `EngineRuntime` (architecture §6.1) initializes the embedded startup snapshot. Because
   i18n is off, no ICU initialization is required — consistent with architecture §6.1's "as
   required by the pinned build". No separate `snapshot_blob.bin` file is shipped.

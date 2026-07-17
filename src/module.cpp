@@ -2,25 +2,44 @@
 
 #include "iv8/version.h"
 
+#ifdef IV8_WITH_V8
+#include "iv8/engine_runtime.h"
+#endif
+
 namespace py = pybind11;
 
-// M1 Phase 1 placeholder native module.
+// iv8 native core.
 //
-// This module intentionally implements NO runtime behavior: no V8, no
-// EngineRuntime, no JSContext/JSValue, no JavaScript evaluation. It exists only
-// so that the package has a real compiled extension and can expose build-time
-// version metadata. The V8 version reported here is the pinned revision the
-// project will build against later; it does NOT mean V8 is present or linked.
+// Phase 2 exposes STATE ONLY (no control API — no init()/shutdown()):
+//   * _v8_version         : compile-time pinned V8 revision (build metadata)
+//   * _v8_commit          : compile-time pinned V8 commit
+//   * _v8_linked          : bool, whether this build links the V8 monolith
+//   * _v8_runtime_version : str when linked (v8::V8::GetVersion()), else None
+//
+// When built with IV8_WITH_V8, V8's process-wide platform is initialized at
+// MODULE IMPORT time. If that initialization fails, the exception propagates and
+// `import iv8` fails with a Python error — there is no "linked but not
+// initialized" half state.
+//
+// No JSContext / JSValue / eval / isolate / context exists yet (Phase 3+).
 PYBIND11_MODULE(_core, module) {
     module.doc() =
-        "iv8 native core (M1 Phase 1 skeleton). "
-        "V8 is not linked or initialized in this phase.";
+        "iv8 native core. Phase 2: process-wide V8 platform init (EngineRuntime) "
+        "only; no isolate/context/eval.";
 
     // Pinned V8 revision metadata, injected at build time from cmake/v8_pin.cmake.
     module.attr("_v8_version") = py::str(IV8_PINNED_V8_VERSION);
     module.attr("_v8_commit") = py::str(IV8_PINNED_V8_COMMIT);
 
-    // Explicit flag so callers cannot mistake the pinned metadata for a linked,
-    // initialized V8 engine.
+#ifdef IV8_WITH_V8
+    // Import-time, process-wide V8 platform initialization. Throws on failure ->
+    // import iv8 fails.
+    iv8::EngineRuntime::ensure_initialized();
+    module.attr("_v8_linked") = py::bool_(true);
+    module.attr("_v8_runtime_version") =
+        py::str(iv8::EngineRuntime::runtime_version());
+#else
     module.attr("_v8_linked") = py::bool_(false);
+    module.attr("_v8_runtime_version") = py::none();
+#endif
 }

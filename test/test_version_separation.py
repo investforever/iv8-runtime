@@ -24,8 +24,13 @@ def test_v8_pin_matches_phase0_decision():
     assert iv8._v8_commit == "209c9cea0db17d8caf23e9d2c7de08c351609744"
 
 
-def test_v8_is_not_linked_in_phase1():
+def test_compile_time_pin_matches_runtime_version_when_linked():
     import iv8
 
-    # Phase 1 ships no linked/initialized V8; the metadata is only a build pin.
-    assert iv8._v8_linked is False
+    # When V8 is actually linked, the runtime version (v8::V8::GetVersion())
+    # must belong to the same pinned line as the compile-time pin. When not
+    # linked, _v8_linked/_v8_runtime_version behavior is owned by
+    # test_engine_runtime.py.
+    if iv8._v8_linked:
+        assert iv8._v8_runtime_version.startswith("15.0.")
+        assert iv8._v8_version.startswith("15.0.")

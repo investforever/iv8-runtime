@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
 
-# NOTE (M1 Phase 1): this is an EMPTY build skeleton. V8 is NOT downloaded,
-# compiled, linked, or initialized here, and no EngineRuntime / JSContext /
-# JSValue / eval behavior exists. The only native artifact is a placeholder
-# pybind11 module that exposes build-time version metadata.
+# M1 Phase 2. The native module exposes build/version metadata and, when
+# IV8_LINK_V8 is ON, links the pinned V8 monolith and initializes V8's
+# process-wide platform (EngineRuntime). No isolate / context / JSContext /
+# JSValue / eval behavior exists yet (Phase 3+).
 
 project(iv8 LANGUAGES CXX)
 
@@ -16,18 +16,41 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # CMake cache/normal variables; it does not fetch or build V8.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/v8_pin.cmake)
 
+# --- IV8_LINK_V8: whether to link the pinned V8 monolith --------------------
+# Default: ON on non-Windows when the pinned monolith artifact is present under
+# data/v8 (produced by tools/build_v8_linux.sh); OFF otherwise (Windows, or when
+# no artifact has been built). No fuzzy/system V8 discovery is ever performed.
+set(_iv8_v8_lib "${CMAKE_CURRENT_SOURCE_DIR}/data/v8/lib/libv8_monolith.a")
+if(NOT WIN32 AND EXISTS "${_iv8_v8_lib}")
+  set(_iv8_link_default ON)
+else()
+  set(_iv8_link_default OFF)
+endif()
+option(IV8_LINK_V8 "Link the pinned V8 monolith and enable EngineRuntime"
+       ${_iv8_link_default})
+message(STATUS "iv8: IV8_LINK_V8=${IV8_LINK_V8}")
+
 find_package(pybind11 CONFIG REQUIRED)
 
-pybind11_add_module(_core src/module.cpp)
+set(_iv8_sources src/module.cpp)
+if(IV8_LINK_V8)
+  list(APPEND _iv8_sources src/core/engine_runtime.cpp)
+endif()
+
+pybind11_add_module(_core ${_iv8_sources})
 
 target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(_core PRIVATE cxx_std_20)
 
-# Inject the pinned V8 metadata as compile definitions so the native module can
-# report it. This is only a build-time pin for a FUTURE V8 link.
+# Pinned V8 metadata (build-time), reported by the module regardless of linking.
 target_compile_definitions(_core PRIVATE
     IV8_PINNED_V8_VERSION="${IV8_PINNED_V8_VERSION}"
     IV8_PINNED_V8_COMMIT="${IV8_PINNED_V8_COMMIT}")
+
+if(IV8_LINK_V8)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/v8_link.cmake)
+  iv8_link_v8_monolith(_core)
+endif()
 
 # Install the extension into the iv8 package directory inside the wheel.
 install(TARGETS _core DESTINATION iv8)

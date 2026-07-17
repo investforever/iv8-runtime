@@ -65,10 +65,18 @@ cat > "$OUT_SUBDIR/args.gn" <<'EOF'
 is_debug = false
 target_cpu = "x64"
 v8_monolithic = true
+# Defines V8_TLS_USED_IN_LIBRARY so V8's thread_local globals use a TLS model
+# valid inside a dlopen'd shared object (the Python extension); see §5.2.
+v8_monolithic_for_shared_library = true
 v8_static_library = true
 is_component_build = false
 v8_use_external_startup_data = false
 v8_enable_i18n_support = false
+# Temporal is implemented via a Rust crate (temporal_rs/temporal_capi) whose
+# archive is not merged into the monolith, leaving undefined temporal_rs_*
+# symbols. M1 does not need Temporal (date/Intl are out of scope), so disable it
+# and drop the Rust dependency entirely. See docs/dependency_strategy.md §5.5.
+v8_enable_temporal_support = false
 use_custom_libcxx = false
 # The V8 sandbox (default on) asserts it requires the hardened custom libc++
 # (use_safe_libcxx), which conflicts with use_custom_libcxx=false. M1 is not a
