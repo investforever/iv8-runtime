@@ -106,6 +106,12 @@ cp -r "$WORK/v8/include/." "$DATA_DIR/include/"
 # Preserve V8's bundled clang + lld (+ resource dir) so the extension links with
 # the SAME toolchain that produced the CREL-using monolith.
 cp -r "$WORK/v8/third_party/llvm-build/Release+Asserts/." "$DATA_DIR/toolchain/"
+# Bundle V8's license (BSD-3-Clause; its LICENSE also enumerates the bundled
+# third-party components) so the redistributable wheel carries it. A full DEPS
+# audit remains a documented follow-up (dependency_strategy.md §3).
+mkdir -p "$DATA_DIR/licenses"
+cp "$WORK/v8/LICENSE" "$DATA_DIR/licenses/LICENSE.v8" 2>/dev/null || true
+for f in "$WORK/v8/LICENSE".*; do [ -f "$f" ] && cp "$f" "$DATA_DIR/licenses/"; done
 {
   echo "V8_VERSION=$V8_VERSION"
   echo "V8_COMMIT=$V8_COMMIT"

@@ -58,6 +58,13 @@ target_compile_definitions(_core PRIVATE
 if(IV8_LINK_V8)
   include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/v8_link.cmake)
   iv8_link_v8_monolith(_core)
+
+  # Bundle V8's license(s) into the wheel next to the package (required to
+  # redistribute the statically-linked V8). Present only in V8-linked builds.
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/data/v8/licenses")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/v8/licenses/"
+            DESTINATION iv8/licenses)
+  endif()
 endif()
 
 # Install the extension into the iv8 package directory inside the wheel.

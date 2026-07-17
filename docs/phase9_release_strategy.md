@@ -193,3 +193,21 @@ Choose **A** (recommended) or **B**. On approval, the corresponding Phase 9
 implementation begins (wheel/CI work for A; or Windows/macOS monolith bring-up for
 B). Until then, no release scripts are written and no Windows/macOS monolith is
 built.
+
+## 8. Execution status (Strategy A chosen)
+
+Strategy A is chosen and implemented via GitHub Actions (no local Docker):
+
+- `tools/build_v8_manylinux.sh` builds the pinned V8 monolith inside
+  `quay.io/pypa/manylinux_2_28_x86_64` (gcc-toolset symlinked for clang's GCC
+  auto-detection; V8 bundled clang+lld preserved for the extension link).
+- `tools/build_linux_wheels.sh` builds cp311–cp314 wheels linking that monolith
+  (`-static-libstdc++ -static-libgcc` for portability), runs `auditwheel repair`,
+  then clean-installs each wheel and runs the full pytest suite.
+- `.github/workflows/release-linux.yml` orchestrates it, caching the monolith.
+
+**Result (CI run 29578161829):** green. Four wheels produced —
+`iv8-0.0.1-cp3{11,12,13,14}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl` —
+each clean-installed and passing the full suite (84 passed, 1 skipped). Wheels
+uploaded as a CI artifact. V8's license is bundled into the wheel under
+`iv8/licenses/`. Windows/macOS remain skeleton-only (not released), per §2.
