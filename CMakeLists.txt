@@ -39,6 +39,7 @@ if(IV8_LINK_V8)
       src/core/engine_runtime.cpp
       src/core/isolate_host.cpp
       src/core/context_host.cpp
+      src/core/value_converter.cpp
       src/binding/context_binding.cpp)
 endif()
 

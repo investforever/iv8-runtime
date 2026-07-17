@@ -30,5 +30,7 @@ void register_context(py::module_& module) {
         .def(py::init<>())
         .def_property_readonly("disposed", &iv8::ContextHost::disposed)
         .def_property_readonly("version", &iv8::ContextHost::version)
+        .def("eval", &iv8::ContextHost::eval, py::arg("source"),
+             py::arg("to_py"), py::arg("name"))
         .def("dispose", &iv8::ContextHost::dispose);
 }

@@ -43,6 +43,24 @@ class JSContext:
         # Delegates to the guarded native accessor, which raises after disposal.
         return self._native.version
 
+    def eval(self, source: str, *, to_py: bool = False, name: str = "<eval>") -> object:
+        """Compile and run JavaScript ``source`` in this context's global scope.
+
+        Phase 4 returns primitives only (bool / int / float / str / None /
+        ``JSUndefined``, including BigInt, NaN, +/-Infinity, -0.0). Complex
+        results and JavaScript errors raise ``RuntimeError`` for now (structured
+        errors and value conversion arrive in later phases). Repeated calls share
+        the same global environment; separate contexts are isolated.
+
+        The ``to_py`` parameter is accepted for a stable signature but has no
+        effect in this phase.
+        """
+        if not isinstance(source, str):
+            raise TypeError("source must be a str")
+        if not isinstance(name, str):
+            raise TypeError("name must be a str")
+        return self._native.eval(source, to_py, name)
+
     def dispose(self) -> None:
         """Release context-owned native resources. Idempotent."""
         self._native.dispose()

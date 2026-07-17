@@ -1,13 +1,17 @@
 """iv8 — Python/V8 interoperability runtime.
 
-M1 Phase 3. This build may link the pinned V8 monolith and initialize V8's
-process-wide platform at import time (EngineRuntime), and exposes ``JSContext``
-lifecycle (create / dispose / context-manager / ``version``). No ``eval``,
-``JSValue``, ``JSUndefined``, or value conversion exists yet (Phase 4+).
+M1 Phase 4. This build may link the pinned V8 monolith and initialize V8's
+process-wide platform at import time (EngineRuntime). ``JSContext`` supports
+lifecycle (create / dispose / context-manager / ``version``) and ``eval`` of
+JavaScript returning primitive values (bool / int / float / str / None /
+``JSUndefined``). Recursive value conversion, ``JSValue``, and structured
+``JSError`` do not exist yet (Phase 5+); complex results and JS errors currently
+raise ``RuntimeError`` placeholders.
 
-``JSContext``, ``JSContextDisposedError``, and ``JSContextBusyError`` are exported
-in BOTH build modes so the public API shape is stable. In a V8-free skeleton
-build, ``JSContext()`` raises ``RuntimeError`` on construction.
+``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``, and
+``JSUndefined`` are exported in BOTH build modes so the public API shape is
+stable. In a V8-free skeleton build, ``JSContext()`` raises ``RuntimeError`` on
+construction.
 
 Exposed module-level values (state only — there is no ``init``/``shutdown`` API):
 
@@ -29,6 +33,7 @@ from importlib import metadata
 from ._core import _v8_commit, _v8_linked, _v8_runtime_version, _v8_version
 from .context import JSContext
 from .errors import JSContextBusyError, JSContextDisposedError
+from .undefined import JSUndefined
 
 __all__ = [
     "__version__",
@@ -39,6 +44,7 @@ __all__ = [
     "JSContext",
     "JSContextDisposedError",
     "JSContextBusyError",
+    "JSUndefined",
 ]
 
 

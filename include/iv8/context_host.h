@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <pybind11/pybind11.h>
+
 #include "v8.h"
 
 #include "iv8/isolate_host.h"
@@ -45,6 +47,17 @@ public:
     // The pinned/runtime V8 version. Runs inside the operation guard and rejects
     // use after disposal.
     std::string version();
+
+    // Compile and run `source` in this context's persistent global environment,
+    // returning a Python primitive (see value_converter). Runs inside the
+    // operation guard (rejects overlap/disposal). Releases the GIL around V8
+    // compile/execute and reacquires it before building the Python result.
+    //
+    // Phase 4: primitives only. `to_py` is accepted for API stability but has no
+    // effect yet (complex results raise regardless); `name` is the script
+    // resource name. JS failures raise a placeholder RuntimeError until Phase 5.
+    pybind11::object eval(const std::string& source, bool to_py,
+                          const std::string& name);
 
     // Idempotent. Rejects with ContextBusyError if an operation is active;
     // otherwise releases the persistent context then the isolate/allocator.
