@@ -42,7 +42,7 @@ std::string ContextHost::version() {
     return EngineRuntime::runtime_version();
 }
 
-py::object ContextHost::eval(const std::string& source, bool /*to_py*/,
+py::object ContextHost::eval(const std::string& source, bool to_py,
                              const std::string& name) {
     // Guard the whole native operation: rejects overlap (ContextBusyError) and
     // use-after-dispose (ContextDisposedError); holds the lock for the duration.
@@ -103,6 +103,12 @@ py::object ContextHost::eval(const std::string& source, bool /*to_py*/,
         // with a deterministic fallback record.
         (void)js_failure;
         throw JsEvalError(std::move(error_data));
+    }
+    // Successful run. Conversion happens with the GIL held; a conversion failure
+    // (unsupported type, cycle, depth, throwing getter) is a ConversionError,
+    // distinct from a JavaScript execution failure.
+    if (to_py) {
+        return to_python_deep(isolate, context, result);
     }
     return to_python_primitive(isolate, context, result);
 }

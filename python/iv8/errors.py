@@ -14,6 +14,13 @@ class JSContextBusyError(RuntimeError):
     """Raised when the same context receives overlapping operations."""
 
 
+class JSConversionError(Exception):
+    """Raised when a JavaScript value cannot be represented under the to_py=True
+    conversion contract: an unsupported complex type, a cyclic reference, or
+    exceeding the maximum conversion depth. A semantic/contract failure (hence
+    ``Exception``, not ``RuntimeError``)."""
+
+
 class JSError(Exception):
     """A JavaScript compile-time or run-time failure.
 
@@ -43,4 +50,9 @@ class JSError(Exception):
         return f"{self.name}: {self.message}"
 
 
-__all__ = ["JSContextDisposedError", "JSContextBusyError", "JSError"]
+__all__ = [
+    "JSContextDisposedError",
+    "JSContextBusyError",
+    "JSConversionError",
+    "JSError",
+]

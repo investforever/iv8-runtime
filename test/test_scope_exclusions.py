@@ -7,14 +7,13 @@ expansion. See docs/test_plan.md §13 and docs/architecture.md §2.
 
 import iv8
 
-# Symbols that must NOT exist yet. As of Phase 5, JSContext, the lifecycle
-# errors, JSUndefined, and JSError ARE public; JSValue/JSConversionError and all
+# Symbols that must NOT exist yet. As of Phase 6, JSContext, the lifecycle
+# errors, JSUndefined, JSError, and JSConversionError ARE public; JSValue and all
 # browser APIs are still forbidden. (`eval` is a JSContext METHOD, not a module
 # attribute, so it is not listed here.)
 _FORBIDDEN = [
-    # M1 runtime surface not yet implemented (Phase 6+).
+    # M1 runtime surface not yet implemented (Phase 7).
     "JSValue",
-    "JSConversionError",
     # Browser / out-of-scope APIs that must never appear.
     "window",
     "document",

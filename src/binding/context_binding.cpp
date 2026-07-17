@@ -4,6 +4,7 @@
 
 #include "iv8/context_host.h"
 #include "iv8/js_exception.h"
+#include "iv8/value_converter.h"
 
 namespace py = pybind11;
 
@@ -24,6 +25,9 @@ void register_context(py::module_& module) {
         } catch (const iv8::ContextBusyError& e) {
             py::object errors = py::module_::import("iv8.errors");
             PyErr_SetString(errors.attr("JSContextBusyError").ptr(), e.what());
+        } catch (const iv8::ConversionError& e) {
+            py::object errors = py::module_::import("iv8.errors");
+            PyErr_SetString(errors.attr("JSConversionError").ptr(), e.what());
         } catch (const iv8::JsEvalError& e) {
             const iv8::JsErrorData& d = e.data();
             py::object errors = py::module_::import("iv8.errors");

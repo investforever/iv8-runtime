@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace py = pybind11;
 
@@ -11,11 +12,8 @@ namespace iv8 {
 
 namespace {
 
-// Largest magnitude that fits losslessly into int64_t. JS integral Numbers only
-// carry exact integers up to 2^53, so everything integral we accept is well
-// within range; values beyond int64 fall back to float.
-constexpr double kInt64UpperExclusive = 9223372036854775808.0;   // 2^63
-constexpr double kInt64Lower = -9223372036854775808.0;           // -2^63
+constexpr double kInt64UpperExclusive = 9223372036854775808.0;  // 2^63
+constexpr double kInt64Lower = -9223372036854775808.0;          // -2^63
 
 py::object convert_number(double value) {
     const bool integral = std::isfinite(value) && std::trunc(value) == value;
@@ -24,13 +22,11 @@ py::object convert_number(double value) {
         value < kInt64UpperExclusive) {
         return py::int_(static_cast<std::int64_t>(value));
     }
-    // Non-integral, NaN, +/-Infinity, negative zero, or out-of-int64 range.
     return py::float_(value);
 }
 
 py::object convert_bigint(v8::Isolate* isolate, v8::Local<v8::Context> context,
                           v8::Local<v8::Value> value) {
-    // Use the decimal string form for arbitrary precision (no 64-bit truncation).
     v8::Local<v8::String> as_string;
     if (value->ToString(context).ToLocal(&as_string)) {
         v8::String::Utf8Value utf8(isolate, as_string);
@@ -45,36 +41,183 @@ py::object convert_bigint(v8::Isolate* isolate, v8::Local<v8::Context> context,
     throw std::runtime_error("failed to convert BigInt value");
 }
 
-}  // namespace
-
-py::object to_python_primitive(v8::Isolate* isolate,
-                               v8::Local<v8::Context> context,
-                               v8::Local<v8::Value> value) {
+// Handle the primitive value cases shared by both conversion modes. Returns true
+// and sets `out` if `value` is a supported primitive; returns false otherwise
+// (i.e. `value` is a complex value the caller must handle).
+bool try_primitive(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                   v8::Local<v8::Value> value, py::object& out) {
     if (value->IsUndefined()) {
-        return py::module_::import("iv8").attr("JSUndefined");
+        out = py::module_::import("iv8").attr("JSUndefined");
+        return true;
     }
     if (value->IsNull()) {
-        return py::none();
+        out = py::none();
+        return true;
     }
     if (value->IsBoolean()) {
-        return py::bool_(value.As<v8::Boolean>()->Value());
+        out = py::bool_(value.As<v8::Boolean>()->Value());
+        return true;
     }
     if (value->IsBigInt()) {
-        return convert_bigint(isolate, context, value);
+        out = convert_bigint(isolate, context, value);
+        return true;
     }
     if (value->IsNumber()) {
-        return convert_number(value.As<v8::Number>()->Value());
+        out = convert_number(value.As<v8::Number>()->Value());
+        return true;
     }
     if (value->IsString()) {
         v8::String::Utf8Value utf8(isolate, value);
         if (*utf8 == nullptr) {
             throw std::runtime_error("failed to convert JavaScript string");
         }
-        return py::str(*utf8, static_cast<size_t>(utf8.length()));
+        out = py::str(*utf8, static_cast<size_t>(utf8.length()));
+        return true;
     }
-    // Array, Object, Function, Date, Promise, Map, Set, Symbol, host objects...
+    return false;
+}
+
+// Name of a complex JS type for diagnostics in conversion errors.
+std::string describe_type(v8::Local<v8::Value> value) {
+    if (value->IsFunction()) return "Function";
+    if (value->IsPromise()) return "Promise";
+    if (value->IsMap()) return "Map";
+    if (value->IsSet()) return "Set";
+    if (value->IsWeakMap()) return "WeakMap";
+    if (value->IsWeakSet()) return "WeakSet";
+    if (value->IsDate()) return "Date";
+    if (value->IsRegExp()) return "RegExp";
+    if (value->IsProxy()) return "Proxy";
+    if (value->IsArrayBuffer()) return "ArrayBuffer";
+    if (value->IsTypedArray()) return "TypedArray";
+    if (value->IsDataView()) return "DataView";
+    if (value->IsSymbol() || value->IsSymbolObject()) return "Symbol";
+    if (value->IsNativeError()) return "Error";
+    return "object";
+}
+
+// A "plain" data object convertible to dict: an Object that is not any of the
+// excluded special/host object kinds.
+bool is_plain_object(v8::Local<v8::Value> value) {
+    if (!value->IsObject() || value->IsArray()) {
+        return false;
+    }
+    if (value->IsFunction() || value->IsPromise() || value->IsMap() ||
+        value->IsSet() || value->IsWeakMap() || value->IsWeakSet() ||
+        value->IsDate() || value->IsRegExp() || value->IsProxy() ||
+        value->IsArrayBuffer() || value->IsTypedArray() || value->IsDataView() ||
+        value->IsSymbolObject() || value->IsBooleanObject() ||
+        value->IsNumberObject() || value->IsStringObject() ||
+        value->IsBigIntObject() || value->IsExternal() ||
+        value->IsNativeError()) {
+        return false;
+    }
+    return true;
+}
+
+py::object deep_impl(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                     v8::Local<v8::Value> value, int depth,
+                     std::vector<v8::Local<v8::Object>>& ancestors) {
+    py::object primitive;
+    if (try_primitive(isolate, context, value, primitive)) {
+        return primitive;
+    }
+
+    const bool is_array = value->IsArray();
+    const bool is_object = !is_array && is_plain_object(value);
+    if (!is_array && !is_object) {
+        throw ConversionError(
+            "unsupported JavaScript type for to_py=True: " + describe_type(value));
+    }
+
+    if (depth > kMaxConversionDepth) {
+        throw ConversionError("maximum conversion depth (" +
+                              std::to_string(kMaxConversionDepth) +
+                              ") exceeded during to_py conversion");
+    }
+
+    v8::Local<v8::Object> object = value.As<v8::Object>();
+    // Cycle detection by V8 object identity (not structural equality).
+    for (const v8::Local<v8::Object>& ancestor : ancestors) {
+        if (object->SameValue(ancestor)) {
+            throw ConversionError(
+                "circular reference detected during to_py conversion");
+        }
+    }
+    ancestors.push_back(object);
+
+    py::object result;
+    if (is_array) {
+        v8::Local<v8::Array> array = value.As<v8::Array>();
+        const uint32_t length = array->Length();
+        py::list items;
+        for (uint32_t index = 0; index < length; ++index) {
+            v8::TryCatch try_catch(isolate);
+            v8::Local<v8::Value> element;
+            if (!array->Get(context, index).ToLocal(&element)) {
+                ancestors.pop_back();
+                throw ConversionError(
+                    "property access raised during to_py conversion");
+            }
+            items.append(
+                deep_impl(isolate, context, element, depth + 1, ancestors));
+        }
+        result = std::move(items);
+    } else {
+        // Own enumerable string keys only (Object.keys semantics; no symbols).
+        v8::Local<v8::Array> keys;
+        if (!object->GetOwnPropertyNames(context).ToLocal(&keys)) {
+            ancestors.pop_back();
+            throw ConversionError("failed to enumerate object properties");
+        }
+        py::dict mapping;
+        const uint32_t count = keys->Length();
+        for (uint32_t index = 0; index < count; ++index) {
+            v8::Local<v8::Value> key;
+            if (!keys->Get(context, index).ToLocal(&key)) {
+                ancestors.pop_back();
+                throw ConversionError("failed to read object property name");
+            }
+            v8::TryCatch try_catch(isolate);
+            v8::Local<v8::Value> property;
+            if (!object->Get(context, key).ToLocal(&property)) {
+                ancestors.pop_back();
+                throw ConversionError(
+                    "property access raised during to_py conversion");
+            }
+            v8::String::Utf8Value key_utf8(isolate, key);
+            std::string key_string =
+                (*key_utf8 != nullptr)
+                    ? std::string(*key_utf8, static_cast<size_t>(key_utf8.length()))
+                    : std::string();
+            mapping[py::str(key_string)] =
+                deep_impl(isolate, context, property, depth + 1, ancestors);
+        }
+        result = std::move(mapping);
+    }
+
+    ancestors.pop_back();
+    return result;
+}
+
+}  // namespace
+
+py::object to_python_primitive(v8::Isolate* isolate,
+                               v8::Local<v8::Context> context,
+                               v8::Local<v8::Value> value) {
+    py::object out;
+    if (try_primitive(isolate, context, value, out)) {
+        return out;
+    }
+    // Complex value under to_py=False: placeholder until JSValue (Phase 7).
     throw std::runtime_error(
         "complex JavaScript values are not supported until Phase 6/7");
+}
+
+py::object to_python_deep(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                          v8::Local<v8::Value> value) {
+    std::vector<v8::Local<v8::Object>> ancestors;
+    return deep_impl(isolate, context, value, 0, ancestors);
 }
 
 }  // namespace iv8
