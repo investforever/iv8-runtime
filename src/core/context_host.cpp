@@ -77,7 +77,9 @@ v8::Local<v8::Value> ContextState::local_value(std::uint64_t id) {
     std::lock_guard<std::mutex> table_lock(table_mutex_);
     auto it = values_.find(id);
     if (it == values_.end()) {
-        return v8::Local<v8::Value>();
+        // The handle is gone (context torn down, or the wrapper is otherwise no
+        // longer backed). Fail safely rather than dereference an empty handle.
+        throw ContextDisposedError();
     }
     return it->second.Get(isolate_host_->isolate());
 }

@@ -1,9 +1,10 @@
 """Public ``JSContext`` — the Python-facing owner of one native V8 context.
 
 Provides lifecycle (construction, ``dispose()``, ``disposed``, ``version``,
-context-manager use) and ``eval`` of JavaScript returning primitive values.
-Recursive value conversion, ``JSValue``, and structured ``JSError`` do not exist
-yet (later phases); complex results currently raise ``RuntimeError``.
+context-manager use) and ``eval`` of JavaScript. ``eval`` returns primitives
+directly, recursively converts Arrays/plain Objects when ``to_py=True``, and
+returns an opaque ``JSValue`` for complex results when ``to_py=False``.
+JavaScript failures raise ``JSError``.
 
 The public API shape is identical in both build modes:
 
@@ -47,14 +48,14 @@ class JSContext:
     def eval(self, source: str, *, to_py: bool = False, name: str = "<eval>") -> object:
         """Compile and run JavaScript ``source`` in this context's global scope.
 
-        Phase 4 returns primitives only (bool / int / float / str / None /
-        ``JSUndefined``, including BigInt, NaN, +/-Infinity, -0.0). Complex
-        results and JavaScript errors raise ``RuntimeError`` for now (structured
-        errors and value conversion arrive in later phases). Repeated calls share
-        the same global environment; separate contexts are isolated.
-
-        The ``to_py`` parameter is accepted for a stable signature but has no
-        effect in this phase.
+        Primitives (bool / int / float / str / None / ``JSUndefined``, including
+        BigInt, NaN, +/-Infinity, -0.0) always convert directly. With
+        ``to_py=True`` Arrays/plain Objects convert recursively to ``list``/
+        ``dict`` (unsupported types / cycles / excess depth raise
+        ``JSConversionError``). With ``to_py=False`` a complex result is returned
+        as an opaque ``JSValue``. JavaScript compile/run failures raise
+        ``JSError``. Repeated calls share the same global environment; separate
+        contexts are isolated.
         """
         if not isinstance(source, str):
             raise TypeError("source must be a str")
