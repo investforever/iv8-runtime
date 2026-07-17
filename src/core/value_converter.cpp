@@ -67,6 +67,9 @@ py::object to_python_primitive(v8::Isolate* isolate,
     }
     if (value->IsString()) {
         v8::String::Utf8Value utf8(isolate, value);
+        if (*utf8 == nullptr) {
+            throw std::runtime_error("failed to convert JavaScript string");
+        }
         return py::str(*utf8, static_cast<size_t>(utf8.length()));
     }
     // Array, Object, Function, Date, Promise, Map, Set, Symbol, host objects...

@@ -1,8 +1,9 @@
 """Public ``JSContext`` — the Python-facing owner of one native V8 context.
 
-Phase 3 provides lifecycle only: construction, ``dispose()``, ``disposed``,
-``version``, and context-manager use. There is no ``eval`` and no value
-conversion yet.
+Provides lifecycle (construction, ``dispose()``, ``disposed``, ``version``,
+context-manager use) and ``eval`` of JavaScript returning primitive values.
+Recursive value conversion, ``JSValue``, and structured ``JSError`` do not exist
+yet (later phases); complex results currently raise ``RuntimeError``.
 
 The public API shape is identical in both build modes:
 
@@ -59,6 +60,8 @@ class JSContext:
             raise TypeError("source must be a str")
         if not isinstance(name, str):
             raise TypeError("name must be a str")
+        if not isinstance(to_py, bool):
+            raise TypeError("to_py must be a bool")
         return self._native.eval(source, to_py, name)
 
     def dispose(self) -> None:
