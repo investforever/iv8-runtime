@@ -1,15 +1,16 @@
 """iv8 — Python/V8 interoperability runtime.
 
-M1 Phase 4. This build may link the pinned V8 monolith and initialize V8's
+M1 Phase 5. This build may link the pinned V8 monolith and initialize V8's
 process-wide platform at import time (EngineRuntime). ``JSContext`` supports
 lifecycle (create / dispose / context-manager / ``version``) and ``eval`` of
 JavaScript returning primitive values (bool / int / float / str / None /
-``JSUndefined``). Recursive value conversion, ``JSValue``, and structured
-``JSError`` do not exist yet (Phase 5+); complex results and JS errors currently
-raise ``RuntimeError`` placeholders.
+``JSUndefined``); JavaScript compile/run failures raise structured ``JSError``.
+Recursive value conversion (``to_py=True``) and ``JSValue`` do not exist yet
+(later phases); complex results under ``to_py=False`` still raise a placeholder
+``RuntimeError``.
 
-``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``, and
-``JSUndefined`` are exported in BOTH build modes so the public API shape is
+``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``, ``JSError``,
+and ``JSUndefined`` are exported in BOTH build modes so the public API shape is
 stable. In a V8-free skeleton build, ``JSContext()`` raises ``RuntimeError`` on
 construction.
 

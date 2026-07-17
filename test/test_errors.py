@@ -54,7 +54,12 @@ def test_error_instance_has_stack_string():
 @on_only
 @pytest.mark.parametrize(
     "expr,expected_message",
-    [("throw 42", "42"), ("throw 'oops'", "oops"), ("throw null", "null")],
+    [
+        ("throw 42", "42"),
+        ("throw 'oops'", "oops"),
+        ("throw null", "null"),
+        ("throw undefined", "undefined"),
+    ],
 )
 def test_primitive_thrown_values_fallback(expr, expected_message):
     with iv8.JSContext() as ctx:

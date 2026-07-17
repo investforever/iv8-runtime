@@ -3,8 +3,8 @@ cmake_minimum_required(VERSION 3.15)
 # iv8 native extension. The module exposes build/version metadata and, when
 # IV8_LINK_V8 is ON, links the pinned V8 monolith, initializes V8's process-wide
 # platform (EngineRuntime), and provides the JSContext lifecycle (IsolateHost /
-# ContextHost) plus primitive-returning eval. Recursive value conversion,
-# JSValue, and structured JSError do not exist yet (later phases).
+# ContextHost), primitive-returning eval, and structured JSError. Recursive value
+# conversion (to_py) and JSValue do not exist yet (later phases).
 
 project(iv8 LANGUAGES CXX)
 
