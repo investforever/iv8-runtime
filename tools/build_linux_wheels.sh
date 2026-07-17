@@ -21,27 +21,25 @@ for ts in 14 13; do
     break
   fi
 done
-# Same explicit libstdc++ wiring as the monolith build (clang won't scan /opt/rh).
+# Make the gcc-toolset discoverable by clang via /usr symlinks (correct include
+# ordering; see build_v8_manylinux.sh for why CPLUS_INCLUDE_PATH is avoided).
 if [ -n "$GCC_TOOLSET_ROOT" ]; then
-  CXXV="$(ls -d "$GCC_TOOLSET_ROOT"/include/c++/* 2>/dev/null | sort -V | tail -1)"
-  TRIP="$(basename "$(ls -d "$CXXV"/*-linux* 2>/dev/null | head -1)")"
-  export CPLUS_INCLUDE_PATH="$CXXV:$CXXV/$TRIP:$CXXV/backward${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-  export LIBRARY_PATH="$GCC_TOOLSET_ROOT/lib/gcc/$TRIP/$(basename "$CXXV"):$GCC_TOOLSET_ROOT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  VER="$(basename "$(ls -d "$GCC_TOOLSET_ROOT"/include/c++/* | sort -V | tail -1)")"
+  TRIP="$(basename "$(ls -d "$GCC_TOOLSET_ROOT"/include/c++/"$VER"/*-linux*)")"
+  mkdir -p "/usr/lib/gcc/$TRIP" "/usr/include/c++"
+  ln -sfn "$GCC_TOOLSET_ROOT/lib/gcc/$TRIP/$VER" "/usr/lib/gcc/$TRIP/$VER"
+  ln -sfn "$GCC_TOOLSET_ROOT/include/c++/$VER" "/usr/include/c++/$VER"
+  export LIBRARY_PATH="$GCC_TOOLSET_ROOT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
   export LD_LIBRARY_PATH="$GCC_TOOLSET_ROOT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 
 TC="$ROOT/data/v8/toolchain"
 export PATH="$TC/bin:$PATH"  # so -fuse-ld=lld finds ld.lld
-CXX_EXTRA=""
-if [ -n "$GCC_TOOLSET_ROOT" ]; then
-  CXX_EXTRA="--gcc-toolchain=$GCC_TOOLSET_ROOT"
-fi
-export CMAKE_ARGS="\
--DCMAKE_C_COMPILER=$TC/bin/clang \
--DCMAKE_CXX_COMPILER=$TC/bin/clang++ \
--DCMAKE_CXX_FLAGS=$CXX_EXTRA \
--DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld \
--DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld"
+export CMAKE_ARGS="-DCMAKE_C_COMPILER=$TC/bin/clang -DCMAKE_CXX_COMPILER=$TC/bin/clang++"
+# Link with lld (CREL) and statically embed the GCC-toolset libstdc++/libgcc so
+# the wheel stays portable on manylinux_2_28 (no new GLIBCXX runtime dep). CMake
+# initializes the module/shared linker flags from LDFLAGS.
+export LDFLAGS="-fuse-ld=lld -static-libstdc++ -static-libgcc"
 
 PYTHONS=(
   /opt/python/cp311-cp311

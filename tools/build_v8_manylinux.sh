@@ -36,16 +36,20 @@ for ts in 14 13; do
 done
 dnf install -y git curl which python3 >/dev/null 2>&1 || true
 
-# V8's bundled clang does NOT scan /opt/rh, so `source enable` alone leaves it
-# using the base GCC 8 headers (no C++20 -> "'version' file not found"). Point
-# clang at the gcc-toolset libstdc++ explicitly via env (honored by clang).
+# V8's bundled clang does NOT scan /opt/rh, so `source enable` alone leaves it on
+# base GCC 8 (no C++20). Making the gcc-toolset discoverable via CPLUS_INCLUDE_PATH
+# breaks libstdc++'s #include_next chain (e.g. <fenv.h>). Instead symlink the
+# toolset into the /usr paths clang scans, so clang detects GCC $ts as the default
+# with correct include ordering.
 GT="/opt/rh/gcc-toolset-$ts/root/usr"
-CXXV="$(ls -d "$GT"/include/c++/* 2>/dev/null | sort -V | tail -1)"
-TRIP="$(basename "$(ls -d "$CXXV"/*-linux* 2>/dev/null | head -1)")"
-export CPLUS_INCLUDE_PATH="$CXXV:$CXXV/$TRIP:$CXXV/backward${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-export LIBRARY_PATH="$GT/lib/gcc/$TRIP/$(basename "$CXXV"):$GT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
+VER="$(basename "$(ls -d "$GT"/include/c++/* | sort -V | tail -1)")"
+TRIP="$(basename "$(ls -d "$GT"/include/c++/"$VER"/*-linux*)")"
+mkdir -p "/usr/lib/gcc/$TRIP" "/usr/include/c++"
+ln -sfn "$GT/lib/gcc/$TRIP/$VER" "/usr/lib/gcc/$TRIP/$VER"
+ln -sfn "$GT/include/c++/$VER" "/usr/include/c++/$VER"
+export LIBRARY_PATH="$GT/lib64${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export LD_LIBRARY_PATH="$GT/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-echo "    CPLUS_INCLUDE_PATH=$CPLUS_INCLUDE_PATH"
+echo "    linked gcc-toolset $VER ($TRIP) into /usr for clang auto-detection"
 
 cd "$WORK"
 export DEPOT_TOOLS_UPDATE=0
