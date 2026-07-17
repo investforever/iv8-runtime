@@ -130,11 +130,12 @@ def test_runtime_throw_raises_js_error():
 
 
 @on_only
-def test_complex_result_raises_runtime_error():
+def test_complex_result_returns_jsvalue_under_to_py_false():
+    # As of Phase 7, complex results under to_py=False return a JSValue wrapper
+    # instead of raising. (Detailed JSValue behavior lives in test_js_value.py.)
     with iv8.JSContext() as ctx:
         for expr in ("({a: 1})", "[1, 2, 3]", "(function () {})", "Symbol('s')"):
-            with pytest.raises(RuntimeError):
-                ctx.eval(expr)
+            assert isinstance(ctx.eval(expr), iv8.JSValue)
 
 
 @on_only

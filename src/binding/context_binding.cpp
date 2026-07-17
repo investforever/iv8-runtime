@@ -4,6 +4,7 @@
 
 #include "iv8/context_host.h"
 #include "iv8/js_exception.h"
+#include "iv8/js_value.h"
 #include "iv8/value_converter.h"
 
 namespace py = pybind11;
@@ -46,4 +47,11 @@ void register_context(py::module_& module) {
         .def("eval", &iv8::ContextHost::eval, py::arg("source"),
              py::arg("to_py"), py::arg("name"))
         .def("dispose", &iv8::ContextHost::dispose);
+
+    // Opaque complex-result wrapper. No public constructor: instances are
+    // produced only by Context.eval(..., to_py=False).
+    py::class_<iv8::JsValue>(module, "JSValue")
+        .def_property_readonly("context_alive", &iv8::JsValue::context_alive)
+        .def_property_readonly("type_name", &iv8::JsValue::type_name)
+        .def("to_py", &iv8::JsValue::to_py);
 }

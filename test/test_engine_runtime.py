@@ -52,7 +52,6 @@ def test_scope_exclusions_still_hold():
         "init",
         "shutdown",
         "initialize_runtime",
-        "JSValue",
         "eval",
         "window",
         "document",

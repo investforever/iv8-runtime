@@ -151,20 +151,16 @@ def test_throwing_getter_raises_conversion_error_not_js_error():
             ctx.eval(expr, to_py=True)
 
 
-# --- the to_py boundary: False keeps the placeholder RuntimeError -----------
+# --- the to_py boundary: False returns a JSValue, does NOT raise ------------
 
 
 @on_only
-def test_complex_result_under_to_py_false_is_runtime_error():
+def test_complex_result_under_to_py_false_returns_jsvalue():
+    # As of Phase 7 the to_py=False complex path returns a JSValue wrapper and
+    # must NOT raise JSConversionError (which is a to_py=True concept).
     with iv8.JSContext() as ctx:
-        with pytest.raises(RuntimeError):
-            ctx.eval("({a: 1})", to_py=False)
-        # And crucially NOT a JSConversionError under to_py=False.
-        with pytest.raises(RuntimeError):
-            try:
-                ctx.eval("[1, 2, 3]", to_py=False)
-            except iv8.JSConversionError:  # pragma: no cover
-                pytest.fail("to_py=False must not raise JSConversionError")
+        assert isinstance(ctx.eval("({a: 1})", to_py=False), iv8.JSValue)
+        assert isinstance(ctx.eval("[1, 2, 3]", to_py=False), iv8.JSValue)
 
 
 # --- both build modes -------------------------------------------------------

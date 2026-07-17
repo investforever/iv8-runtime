@@ -96,12 +96,11 @@ def test_exception_categories_are_separated():
     with iv8.JSContext() as ctx:
         with pytest.raises(iv8.JSError):
             ctx.eval("throw new Error('x')")
-        # Complex result -> placeholder RuntimeError (NOT JSError).
-        with pytest.raises(RuntimeError):
-            ctx.eval("({a: 1})")
-        assert not isinstance(
-            RuntimeError(), iv8.JSError
-        )  # sanity: distinct hierarchies
+        # Complex result under to_py=False -> JSValue wrapper (no exception).
+        assert isinstance(ctx.eval("({a: 1})"), iv8.JSValue)
+        # Unsupported complex under to_py=True -> JSConversionError.
+        with pytest.raises(iv8.JSConversionError):
+            ctx.eval("(function () {})", to_py=True)
 
     # Disposed -> JSContextDisposedError.
     ctx2 = iv8.JSContext()

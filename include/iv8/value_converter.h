@@ -29,12 +29,17 @@ private:
     std::string message_;
 };
 
-// Shallow conversion (to_py=False). Primitives per the contract; any complex
-// value throws std::runtime_error as a placeholder until JSValue (Phase 7).
+// Human-readable type name for a JS value, e.g. "Array", "Object", "Function",
+// "Promise", "Map", "Set", "Date", "RegExp", "Symbol", "TypedArray", ...
+// Used for conversion-error diagnostics and JSValue.type_name.
+std::string describe_js_type(v8::Local<v8::Value> value);
+
+// Convert a supported primitive (undefined/null/bool/BigInt/Number/String) and
+// return true; return false if `value` is a complex value the caller handles
+// (recursive conversion for to_py=True, or a JSValue wrapper for to_py=False).
 // Must run with the GIL held, inside the owning isolate/context scopes.
-pybind11::object to_python_primitive(v8::Isolate* isolate,
-                                     v8::Local<v8::Context> context,
-                                     v8::Local<v8::Value> value);
+bool try_convert_primitive(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                           v8::Local<v8::Value> value, pybind11::object& out);
 
 // Recursive conversion (to_py=True): primitives as above, Array -> list, plain
 // Object -> dict (own enumerable string keys only; Symbol keys ignored).

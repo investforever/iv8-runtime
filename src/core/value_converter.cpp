@@ -41,61 +41,6 @@ py::object convert_bigint(v8::Isolate* isolate, v8::Local<v8::Context> context,
     throw std::runtime_error("failed to convert BigInt value");
 }
 
-// Handle the primitive value cases shared by both conversion modes. Returns true
-// and sets `out` if `value` is a supported primitive; returns false otherwise
-// (i.e. `value` is a complex value the caller must handle).
-bool try_primitive(v8::Isolate* isolate, v8::Local<v8::Context> context,
-                   v8::Local<v8::Value> value, py::object& out) {
-    if (value->IsUndefined()) {
-        out = py::module_::import("iv8").attr("JSUndefined");
-        return true;
-    }
-    if (value->IsNull()) {
-        out = py::none();
-        return true;
-    }
-    if (value->IsBoolean()) {
-        out = py::bool_(value.As<v8::Boolean>()->Value());
-        return true;
-    }
-    if (value->IsBigInt()) {
-        out = convert_bigint(isolate, context, value);
-        return true;
-    }
-    if (value->IsNumber()) {
-        out = convert_number(value.As<v8::Number>()->Value());
-        return true;
-    }
-    if (value->IsString()) {
-        v8::String::Utf8Value utf8(isolate, value);
-        if (*utf8 == nullptr) {
-            throw std::runtime_error("failed to convert JavaScript string");
-        }
-        out = py::str(*utf8, static_cast<size_t>(utf8.length()));
-        return true;
-    }
-    return false;
-}
-
-// Name of a complex JS type for diagnostics in conversion errors.
-std::string describe_type(v8::Local<v8::Value> value) {
-    if (value->IsFunction()) return "Function";
-    if (value->IsPromise()) return "Promise";
-    if (value->IsMap()) return "Map";
-    if (value->IsSet()) return "Set";
-    if (value->IsWeakMap()) return "WeakMap";
-    if (value->IsWeakSet()) return "WeakSet";
-    if (value->IsDate()) return "Date";
-    if (value->IsRegExp()) return "RegExp";
-    if (value->IsProxy()) return "Proxy";
-    if (value->IsArrayBuffer()) return "ArrayBuffer";
-    if (value->IsTypedArray()) return "TypedArray";
-    if (value->IsDataView()) return "DataView";
-    if (value->IsSymbol() || value->IsSymbolObject()) return "Symbol";
-    if (value->IsNativeError()) return "Error";
-    return "object";
-}
-
 // A "plain" data object convertible to dict: an Object that is not any of the
 // excluded special/host object kinds.
 bool is_plain_object(v8::Local<v8::Value> value) {
@@ -119,15 +64,15 @@ py::object deep_impl(v8::Isolate* isolate, v8::Local<v8::Context> context,
                      v8::Local<v8::Value> value, int depth,
                      std::vector<v8::Local<v8::Object>>& ancestors) {
     py::object primitive;
-    if (try_primitive(isolate, context, value, primitive)) {
+    if (try_convert_primitive(isolate, context, value, primitive)) {
         return primitive;
     }
 
     const bool is_array = value->IsArray();
     const bool is_object = !is_array && is_plain_object(value);
     if (!is_array && !is_object) {
-        throw ConversionError(
-            "unsupported JavaScript type for to_py=True: " + describe_type(value));
+        throw ConversionError("unsupported JavaScript type for to_py=True: " +
+                              describe_js_type(value));
     }
 
     if (depth > kMaxConversionDepth) {
@@ -202,16 +147,57 @@ py::object deep_impl(v8::Isolate* isolate, v8::Local<v8::Context> context,
 
 }  // namespace
 
-py::object to_python_primitive(v8::Isolate* isolate,
-                               v8::Local<v8::Context> context,
-                               v8::Local<v8::Value> value) {
-    py::object out;
-    if (try_primitive(isolate, context, value, out)) {
-        return out;
+std::string describe_js_type(v8::Local<v8::Value> value) {
+    if (value->IsArray()) return "Array";
+    if (value->IsFunction()) return "Function";
+    if (value->IsPromise()) return "Promise";
+    if (value->IsMap()) return "Map";
+    if (value->IsSet()) return "Set";
+    if (value->IsWeakMap()) return "WeakMap";
+    if (value->IsWeakSet()) return "WeakSet";
+    if (value->IsDate()) return "Date";
+    if (value->IsRegExp()) return "RegExp";
+    if (value->IsProxy()) return "Proxy";
+    if (value->IsArrayBuffer()) return "ArrayBuffer";
+    if (value->IsTypedArray()) return "TypedArray";
+    if (value->IsDataView()) return "DataView";
+    if (value->IsSymbol() || value->IsSymbolObject()) return "Symbol";
+    if (value->IsNativeError()) return "Error";
+    if (value->IsObject()) return "Object";
+    return "object";
+}
+
+bool try_convert_primitive(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                           v8::Local<v8::Value> value, py::object& out) {
+    if (value->IsUndefined()) {
+        out = py::module_::import("iv8").attr("JSUndefined");
+        return true;
     }
-    // Complex value under to_py=False: placeholder until JSValue (Phase 7).
-    throw std::runtime_error(
-        "complex JavaScript values are not supported until Phase 6/7");
+    if (value->IsNull()) {
+        out = py::none();
+        return true;
+    }
+    if (value->IsBoolean()) {
+        out = py::bool_(value.As<v8::Boolean>()->Value());
+        return true;
+    }
+    if (value->IsBigInt()) {
+        out = convert_bigint(isolate, context, value);
+        return true;
+    }
+    if (value->IsNumber()) {
+        out = convert_number(value.As<v8::Number>()->Value());
+        return true;
+    }
+    if (value->IsString()) {
+        v8::String::Utf8Value utf8(isolate, value);
+        if (*utf8 == nullptr) {
+            throw std::runtime_error("failed to convert JavaScript string");
+        }
+        out = py::str(*utf8, static_cast<size_t>(utf8.length()));
+        return true;
+    }
+    return false;
 }
 
 py::object to_python_deep(v8::Isolate* isolate, v8::Local<v8::Context> context,

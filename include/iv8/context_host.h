@@ -1,10 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 #include <pybind11/pybind11.h>
 
@@ -14,8 +16,8 @@
 
 namespace iv8 {
 
-// Structured lifecycle errors. These are translated by the binding layer into
-// the public Python exceptions iv8.JSContextDisposedError / JSContextBusyError.
+// Structured lifecycle errors, translated by the binding layer into the public
+// Python exceptions iv8.JSContextDisposedError / JSContextBusyError.
 class ContextDisposedError : public std::runtime_error {
 public:
     ContextDisposedError()
@@ -28,67 +30,100 @@ public:
         : std::runtime_error("JSContext already has an active operation") {}
 };
 
-// Owns one JSContext's native state: an IsolateHost (isolate + allocator) and a
-// persistent v8::Context. Provides deterministic, idempotent, non-throwing
-// teardown and an operation guard that rejects overlapping use.
-//
-// Phase 3 scope: lifecycle + guard only. No eval, conversion, JSValue, or
-// exception-object enrichment.
-class ContextHost {
+// Shared native state for one JSContext. Owns the isolate (+ allocator), the
+// persistent context, the operation guard, and a handle table of outstanding
+// JSValue persistent handles. Held by a shared_ptr so JSValue wrappers can
+// safely observe the disposed flag after teardown WITHOUT keeping the isolate
+// alive: V8 resource lifetime is controlled by teardown(), not by shared_ptr
+// refcount.
+class ContextState : public std::enable_shared_from_this<ContextState> {
 public:
-    ContextHost();
-    ~ContextHost();
+    ContextState();
+    ~ContextState();
 
-    ContextHost(const ContextHost&) = delete;
-    ContextHost& operator=(const ContextHost&) = delete;
+    ContextState(const ContextState&) = delete;
+    ContextState& operator=(const ContextState&) = delete;
 
-    bool disposed() const { return disposed_; }
+    bool disposed() const {
+        return disposed_.load(std::memory_order_acquire);
+    }
+    bool alive() const { return !disposed(); }
 
-    // The pinned/runtime V8 version. Runs inside the operation guard and rejects
-    // use after disposal.
     std::string version();
-
-    // Compile and run `source` in this context's persistent global environment,
-    // returning a Python primitive (see value_converter). Runs inside the
-    // operation guard (rejects overlap/disposal). Releases the GIL around V8
-    // compile/execute and reacquires it before building the Python result.
-    //
-    // Phase 4: primitives only. `to_py` is accepted for API stability but has no
-    // effect yet (complex results raise regardless); `name` is the script
-    // resource name. JS failures raise a placeholder RuntimeError until Phase 5.
     pybind11::object eval(const std::string& source, bool to_py,
                           const std::string& name);
 
-    // Idempotent. Rejects with ContextBusyError if an operation is active;
-    // otherwise releases the persistent context then the isolate/allocator.
+    // Explicit dispose: rejects if an operation is active (ContextBusyError),
+    // otherwise runs the ordered teardown.
     void dispose();
+
+    // Idempotent, non-throwing ordered teardown: mark disposed -> reset all
+    // JSValue handles -> reset persistent context -> dispose isolate -> release
+    // allocator. Safe to call from destructors and on GC.
+    void teardown() noexcept;
+
+    // --- JSValue handle table -------------------------------------------------
+    // type_name / to_py for a retained value; both run under the operation guard
+    // and raise ContextDisposedError after teardown.
+    std::string value_type_name(std::uint64_t id);
+    pybind11::object value_to_py(std::uint64_t id);
+    // Drop a retained handle. noexcept: safe to call from JSValue destruction
+    // (Python GC), including after teardown (then a no-op).
+    void release_value(std::uint64_t id) noexcept;
 
 private:
     friend class OperationScope;
 
-    // Non-throwing ordered teardown: reset the persistent context (isolate still
-    // alive), then destroy the IsolateHost (disposes isolate, frees allocator).
-    void teardown() noexcept;
+    // Store a value in the handle table and return its opaque id. Called only
+    // from eval() while the operation guard is held.
+    std::uint64_t retain_value(v8::Local<v8::Value> value);
+    // Materialize a retained handle as a Local. Caller must hold the operation
+    // guard and an active HandleScope.
+    v8::Local<v8::Value> local_value(std::uint64_t id);
 
     std::unique_ptr<IsolateHost> isolate_host_;
     v8::Global<v8::Context> context_;
-    // Serializes operations on this context. A held lock means an operation is
-    // active; overlapping attempts (including from other threads once eval
-    // releases the GIL) fail fast with ContextBusyError via try_lock.
+
     std::mutex op_mutex_;
-    // Lock-free readable status (the authoritative check happens under the lock
-    // in OperationScope). Atomic so the disposed() getter is race-free.
     std::atomic<bool> disposed_{false};
+
+    // Separate mutex for the handle table so JSValue release (GC) is serialized
+    // against retain/lookup/clear without touching the operation mutex.
+    std::mutex table_mutex_;
+    std::unordered_map<std::uint64_t, v8::Global<v8::Value>> values_;
+    std::uint64_t next_id_ = 1;
 };
 
-// RAII guard for a single native operation on a ContextHost. Non-blocking:
-// try-locks the context's operation mutex and rejects an overlapping operation
-// with ContextBusyError (never serializes/blocks), and rejects use after
-// disposal with ContextDisposedError. Holds the lock for the operation's
-// lifetime. Covers every native operation entry point.
+// Thin per-JSContext owner: holds the shared state and delegates. This is the
+// type bound to Python as _core.Context.
+class ContextHost {
+public:
+    ContextHost() : state_(std::make_shared<ContextState>()) {}
+    // GC of the Python context releases native V8 resources immediately
+    // (api_contract §8), even if JSValue wrappers still reference the state.
+    ~ContextHost() { state_->teardown(); }
+
+    ContextHost(const ContextHost&) = delete;
+    ContextHost& operator=(const ContextHost&) = delete;
+
+    bool disposed() const { return state_->disposed(); }
+    std::string version() { return state_->version(); }
+    pybind11::object eval(const std::string& source, bool to_py,
+                          const std::string& name) {
+        return state_->eval(source, to_py, name);
+    }
+    void dispose() { state_->dispose(); }
+
+private:
+    std::shared_ptr<ContextState> state_;
+};
+
+// RAII operation guard: non-blocking try-lock of the context's operation mutex
+// (overlap -> ContextBusyError; never serializes), plus a use-after-dispose
+// check (ContextDisposedError). Holds the lock for the operation's lifetime.
 class OperationScope {
 public:
-    explicit OperationScope(ContextHost& host);
+    explicit OperationScope(ContextState& state);
 
     OperationScope(const OperationScope&) = delete;
     OperationScope& operator=(const OperationScope&) = delete;

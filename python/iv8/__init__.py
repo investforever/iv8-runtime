@@ -39,6 +39,7 @@ from .errors import (
     JSConversionError,
     JSError,
 )
+from .jsvalue import JSValue
 from .undefined import JSUndefined
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "JSConversionError",
     "JSError",
     "JSUndefined",
+    "JSValue",
 ]
 
 

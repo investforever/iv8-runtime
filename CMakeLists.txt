@@ -41,6 +41,7 @@ if(IV8_LINK_V8)
       src/core/context_host.cpp
       src/core/value_converter.cpp
       src/core/js_exception.cpp
+      src/core/js_value.cpp
       src/binding/context_binding.cpp)
 endif()
 
