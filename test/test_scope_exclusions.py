@@ -1,22 +1,20 @@
-"""Phase 1 scope-guard tests.
+"""Scope-guard tests.
 
-These assert the skeleton has NOT prematurely grown any M1+ runtime surface or
-browser API. They protect against accidental scope expansion. See
-docs/test_plan.md §13 and docs/architecture.md §2.
+These assert the package has NOT prematurely grown M1+ runtime surface (beyond
+the current phase) or any browser API. They protect against accidental scope
+expansion. See docs/test_plan.md §13 and docs/architecture.md §2.
 """
 
 import iv8
 
-# Symbols that must NOT exist yet in the Phase 1 skeleton.
+# Symbols that must NOT exist yet. As of Phase 3, JSContext and the two
+# lifecycle errors ARE public; value/eval/conversion surface is still forbidden.
 _FORBIDDEN = [
-    # M1 runtime surface (arrives in later phases, not Phase 1).
-    "JSContext",
+    # M1 runtime surface not yet implemented (Phase 4+).
     "JSValue",
     "JSUndefined",
     "JSError",
     "JSConversionError",
-    "JSContextDisposedError",
-    "JSContextBusyError",
     "eval",
     # Browser / out-of-scope APIs that must never appear.
     "window",

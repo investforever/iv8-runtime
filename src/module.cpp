@@ -4,6 +4,8 @@
 
 #ifdef IV8_WITH_V8
 #include "iv8/engine_runtime.h"
+// Defined in src/binding/context_binding.cpp (compiled only in V8-linked builds).
+void register_context(pybind11::module_& module);
 #endif
 
 namespace py = pybind11;
@@ -38,6 +40,8 @@ PYBIND11_MODULE(_core, module) {
     module.attr("_v8_linked") = py::bool_(true);
     module.attr("_v8_runtime_version") =
         py::str(iv8::EngineRuntime::runtime_version());
+    // Register the native Context type (_core.Context) and exception translators.
+    register_context(module);
 #else
     module.attr("_v8_linked") = py::bool_(false);
     module.attr("_v8_runtime_version") = py::none();

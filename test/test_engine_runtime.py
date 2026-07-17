@@ -46,12 +46,12 @@ def test_reimport_does_not_crash():
 
 
 def test_scope_exclusions_still_hold():
-    # Phase 2 adds no control API and no runtime/browser surface.
+    # No process-level control API, and no value/eval/browser surface yet.
+    # (JSContext IS public as of Phase 3 and is intentionally not listed here.)
     for name in (
         "init",
         "shutdown",
         "initialize_runtime",
-        "JSContext",
         "JSValue",
         "eval",
         "window",

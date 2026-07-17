@@ -34,7 +34,11 @@ find_package(pybind11 CONFIG REQUIRED)
 
 set(_iv8_sources src/module.cpp)
 if(IV8_LINK_V8)
-  list(APPEND _iv8_sources src/core/engine_runtime.cpp)
+  list(APPEND _iv8_sources
+      src/core/engine_runtime.cpp
+      src/core/isolate_host.cpp
+      src/core/context_host.cpp
+      src/binding/context_binding.cpp)
 endif()
 
 pybind11_add_module(_core ${_iv8_sources})

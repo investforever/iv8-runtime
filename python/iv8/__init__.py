@@ -1,10 +1,15 @@
 """iv8 — Python/V8 interoperability runtime.
 
-M1 Phase 2. This build may link the pinned V8 monolith and initialize V8's
-process-wide platform at import time (EngineRuntime). No ``JSContext`` /
-``JSValue`` / ``eval`` / isolate / context behavior exists yet (Phase 3+).
+M1 Phase 3. This build may link the pinned V8 monolith and initialize V8's
+process-wide platform at import time (EngineRuntime), and exposes ``JSContext``
+lifecycle (create / dispose / context-manager / ``version``). No ``eval``,
+``JSValue``, ``JSUndefined``, or value conversion exists yet (Phase 4+).
 
-Exposed values (state only — there is no ``init``/``shutdown`` control API):
+``JSContext``, ``JSContextDisposedError``, and ``JSContextBusyError`` are exported
+in BOTH build modes so the public API shape is stable. In a V8-free skeleton
+build, ``JSContext()`` raises ``RuntimeError`` on construction.
+
+Exposed module-level values (state only — there is no ``init``/``shutdown`` API):
 
 * ``__version__`` — semantic package version, from package metadata
   (``pyproject.toml``).
@@ -22,6 +27,8 @@ this package raises rather than leaving a half-initialized state.
 from importlib import metadata
 
 from ._core import _v8_commit, _v8_linked, _v8_runtime_version, _v8_version
+from .context import JSContext
+from .errors import JSContextBusyError, JSContextDisposedError
 
 __all__ = [
     "__version__",
@@ -29,6 +36,9 @@ __all__ = [
     "_v8_commit",
     "_v8_linked",
     "_v8_runtime_version",
+    "JSContext",
+    "JSContextDisposedError",
+    "JSContextBusyError",
 ]
 
 
