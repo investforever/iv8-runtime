@@ -17,7 +17,7 @@ name = "iv8"
 # (project metadata). It is intentionally unrelated to the pinned V8 revision,
 # which lives in cmake/v8_pin.cmake and is exposed separately as iv8._v8_version.
 version = "0.0.1"
-description = "Python/V8 interoperability runtime (M1 Phase 1 build skeleton; V8 not yet linked)."
+description = "Python/V8 interoperability runtime (M1 Phase 2 skeleton; V8 may be linked depending on build mode)."
 requires-python = ">=3.11,<3.15"
 # Project's own license (SPDX), independent of V8's BSD-3-Clause.
 license = "Apache-2.0"

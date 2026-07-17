@@ -42,6 +42,9 @@ void EngineRuntime::ensure_initialized() {
 }
 
 std::string EngineRuntime::runtime_version() {
+    // Self-guard: tighten the invariant that the version is only reported once
+    // the platform is initialized, regardless of call path.
+    ensure_initialized();
     return std::string(v8::V8::GetVersion());
 }
 
