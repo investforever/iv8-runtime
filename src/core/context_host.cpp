@@ -4,32 +4,12 @@
 #include <string>
 
 #include "iv8/engine_runtime.h"
+#include "iv8/js_exception.h"
 #include "iv8/value_converter.h"
 
 namespace py = pybind11;
 
 namespace iv8 {
-
-namespace {
-
-// Extract a best-effort message from a caught JS exception. V8-only work; safe
-// to call without the GIL. Used for the Phase 4 placeholder error text.
-std::string describe_error(v8::Isolate* isolate, v8::Local<v8::Context> context,
-                           v8::TryCatch& try_catch) {
-    v8::Local<v8::Value> exception = try_catch.Exception();
-    if (!exception.IsEmpty()) {
-        v8::Local<v8::String> as_string;
-        if (exception->ToString(context).ToLocal(&as_string)) {
-            v8::String::Utf8Value utf8(isolate, as_string);
-            if (*utf8 != nullptr) {
-                return std::string(*utf8, static_cast<size_t>(utf8.length()));
-            }
-        }
-    }
-    return "JavaScript evaluation failed";
-}
-
-}  // namespace
 
 OperationScope::OperationScope(ContextHost& host)
     : lock_(host.op_mutex_, std::try_to_lock) {
@@ -78,9 +58,11 @@ py::object ContextHost::eval(const std::string& source, bool /*to_py*/,
 
     v8::Local<v8::Value> result;
     bool ok = false;
-    std::string error;
+    bool js_failure = false;
+    JsErrorData error_data;
     {
-        // Compile + execute without holding the Python GIL.
+        // Compile + execute without holding the Python GIL. Structured error
+        // extraction is also V8-only work and stays inside this GIL-free region.
         py::gil_scoped_release release_gil;
 
         v8::Local<v8::String> source_string;
@@ -89,20 +71,26 @@ py::object ContextHost::eval(const std::string& source, bool /*to_py*/,
                                      v8::NewStringType::kNormal,
                                      static_cast<int>(source.size()))
                  .ToLocal(&source_string)) {
-            error = "failed to allocate source string";
+            error_data.name = "Error";
+            error_data.message = "failed to allocate source string";
+            error_data.resource_name = name;
         } else if (!v8::String::NewFromUtf8(isolate, name.data(),
                                             v8::NewStringType::kNormal,
                                             static_cast<int>(name.size()))
                         .ToLocal(&resource_name)) {
-            error = "failed to allocate script name";
+            error_data.name = "Error";
+            error_data.message = "failed to allocate script name";
+            error_data.resource_name = name;
         } else {
             v8::ScriptOrigin origin(resource_name);
             v8::Local<v8::Script> script;
             if (!v8::Script::Compile(context, source_string, &origin)
                      .ToLocal(&script)) {
-                error = describe_error(isolate, context, try_catch);
+                js_failure = true;
+                error_data = extract_js_error(isolate, context, try_catch, name);
             } else if (!script->Run(context).ToLocal(&result)) {
-                error = describe_error(isolate, context, try_catch);
+                js_failure = true;
+                error_data = extract_js_error(isolate, context, try_catch, name);
             } else {
                 ok = true;
             }
@@ -110,9 +98,11 @@ py::object ContextHost::eval(const std::string& source, bool /*to_py*/,
     }  // GIL reacquired here
 
     if (!ok) {
-        // Placeholder for Phase 4; Phase 5 replaces this with a structured
-        // JSError carrying name/message/stack/line/column.
-        throw std::runtime_error("JavaScript error: " + error);
+        // Structured JavaScript failure -> iv8.JSError (translated by the binding
+        // layer). The two non-js_failure cases (allocation) reuse the same path
+        // with a deterministic fallback record.
+        (void)js_failure;
+        throw JsEvalError(std::move(error_data));
     }
     return to_python_primitive(isolate, context, result);
 }

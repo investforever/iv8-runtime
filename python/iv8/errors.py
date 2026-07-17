@@ -1,8 +1,8 @@
 """Public iv8 exception types.
 
-Phase 3 introduces only the two lifecycle errors. Execution/conversion errors
-(``JSError``, ``JSConversionError``) arrive in later phases and are intentionally
-not defined yet.
+Lifecycle errors (``JSContextDisposedError``, ``JSContextBusyError``) and the
+structured JavaScript execution error (``JSError``). ``JSConversionError`` arrives
+in a later phase and is intentionally not defined yet.
 """
 
 
@@ -14,4 +14,33 @@ class JSContextBusyError(RuntimeError):
     """Raised when the same context receives overlapping operations."""
 
 
-__all__ = ["JSContextDisposedError", "JSContextBusyError"]
+class JSError(Exception):
+    """A JavaScript compile-time or run-time failure.
+
+    Carries the structured fields captured from V8. ``str(error)`` is
+    ``"<name>: <message>"``; the original JavaScript stack (when available) stays
+    in ``stack``.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        message: str,
+        stack: str,
+        resource_name: str,
+        line,
+        column,
+    ) -> None:
+        self.name = name
+        self.message = message
+        self.stack = stack
+        self.resource_name = resource_name
+        self.line = line
+        self.column = column
+        super().__init__(f"{name}: {message}")
+
+    def __str__(self) -> str:
+        return f"{self.name}: {self.message}"
+
+
+__all__ = ["JSContextDisposedError", "JSContextBusyError", "JSError"]

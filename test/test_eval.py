@@ -102,9 +102,10 @@ def test_cross_context_globals_are_isolated():
         b.eval("var shared = 2")
         assert a.eval("shared") == 1
         assert b.eval("shared") == 2
-        # A global defined only in `a` must not exist in `b`.
+        # A global defined only in `a` must not exist in `b` (ReferenceError,
+        # which is a JavaScript failure -> JSError as of Phase 5).
         a.eval("var onlyA = 99")
-        with pytest.raises(RuntimeError):
+        with pytest.raises(iv8.JSError):
             b.eval("onlyA")
     finally:
         a.dispose()
@@ -115,16 +116,16 @@ def test_cross_context_globals_are_isolated():
 
 
 @on_only
-def test_invalid_javascript_raises_runtime_error():
+def test_invalid_javascript_raises_js_error():
     with iv8.JSContext() as ctx:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(iv8.JSError):
             ctx.eval("this is not valid js !!!")
 
 
 @on_only
-def test_runtime_throw_raises_runtime_error():
+def test_runtime_throw_raises_js_error():
     with iv8.JSContext() as ctx:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(iv8.JSError):
             ctx.eval("throw new TypeError('boom')")
 
 

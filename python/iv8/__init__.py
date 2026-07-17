@@ -32,7 +32,7 @@ from importlib import metadata
 
 from ._core import _v8_commit, _v8_linked, _v8_runtime_version, _v8_version
 from .context import JSContext
-from .errors import JSContextBusyError, JSContextDisposedError
+from .errors import JSContextBusyError, JSContextDisposedError, JSError
 from .undefined import JSUndefined
 
 __all__ = [
@@ -44,6 +44,7 @@ __all__ = [
     "JSContext",
     "JSContextDisposedError",
     "JSContextBusyError",
+    "JSError",
     "JSUndefined",
 ]
 

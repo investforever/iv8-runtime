@@ -3,6 +3,7 @@
 #include <exception>
 
 #include "iv8/context_host.h"
+#include "iv8/js_exception.h"
 
 namespace py = pybind11;
 
@@ -23,6 +24,14 @@ void register_context(py::module_& module) {
         } catch (const iv8::ContextBusyError& e) {
             py::object errors = py::module_::import("iv8.errors");
             PyErr_SetString(errors.attr("JSContextBusyError").ptr(), e.what());
+        } catch (const iv8::JsEvalError& e) {
+            const iv8::JsErrorData& d = e.data();
+            py::object errors = py::module_::import("iv8.errors");
+            py::object line = d.has_line ? py::cast(d.line) : py::none();
+            py::object column = d.has_column ? py::cast(d.column) : py::none();
+            py::object error = errors.attr("JSError")(
+                d.name, d.message, d.stack, d.resource_name, line, column);
+            PyErr_SetObject(errors.attr("JSError").ptr(), error.ptr());
         }
     });
 
