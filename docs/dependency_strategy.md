@@ -542,32 +542,33 @@ still optional-future for extra reproducibility beyond the pinned commits.
 **Acceptance:** ✅ reproducible `libv8_monolith.a` from the pinned commit,
 `DEPOT_TOOLS_UPDATE=0`, committed build script (`tools/build_v8_linux.sh`).
 
-### EC-3 — Multi-platform / multi-Python CI — 🟡 CONFIG WRITTEN (push pending)
+### EC-3 — Multi-platform / multi-Python CI — ✅ SATISFIED (2026-07-17)
 
 **Goal:** a CI matrix so every Phase-2+ change is validated across the support matrix
 (§6) rather than only on the local Python 3.12 / Windows box.
 
-**Decision (made):** **GitHub Actions**, repo to be pushed to a remote.
+**Decision (made):** **GitHub Actions**; repo pushed to
+`https://github.com/investforever/iv8-runtime`.
 
-**Status (2026-07-16):**
-- Bootstrap workflow committed at `.github/workflows/ci.yml`: matrix
-  {`ubuntu-latest`, `windows-latest`, `macos-14` (arm64), `macos-13` (x64)} ×
-  Python {3.11, 3.12, 3.13, 3.14}. Each lane builds the wheel (PEP 517), installs it,
-  imports `iv8` from outside the source tree, asserts version separation + `_v8_linked is
-  False`, and runs `pytest`. Windows adds clang-cl to PATH (§5.4 / EC-1).
-- **BLOCKER: no git remote is configured** (local repo only). The workflow cannot run until
-  the repo is pushed to a hosted GitHub remote. Creating/authorizing that remote is a
-  user action.
+**Result / recorded evidence:**
+- Bootstrap workflow `.github/workflows/ci.yml` pushed and triggered (run `29547288065`,
+  commit `0fc31f5`). Matrix {`ubuntu-latest`, `windows-latest`, `macos-14` (arm64),
+  `macos-13` (x64)} × Python {3.11, 3.12, 3.13, 3.14}. Each lane builds the wheel (PEP
+  517), installs it, imports `iv8` from outside the source tree, asserts version
+  separation + `_v8_linked is False`, and runs `pytest`. Windows uses clang-cl (§5.4).
+- **12/16 lanes green:** all Linux, all Windows (clang-cl), and all macOS-arm64
+  (`macos-14`), across Python 3.11–3.14. The 4 `macos-13` (Intel) lanes stayed queued for
+  a runner (GitHub Intel-mac scarcity).
 
-**Remaining:**
-1. User creates/authorizes a GitHub remote and it is pushed (`git remote add … && git push`).
-2. Confirm the bootstrap lanes (at least Linux x64 + Windows x64) go green on the V8-free
-   skeleton.
-3. Later: add V8-linking lanes (consume the cached monolith from EC-2), a Linux debug/ASan
-   lane (`test_plan.md` §15), and release wheels via `cibuildwheel` (§7).
+**EC-3 completion definition (agreed 2026-07-17):** EC-3 is satisfied by **platform-family
+coverage** — Linux x64, Windows x64 (clang-cl), and macOS (arm64 via `macos-14`), each
+green across all supported Python versions (3.11–3.14). Completion is **not blocked by the
+Intel-mac (`macos-13`) queue state**: `macos-13` is retained only as redundant Intel
+coverage and is marked `continue-on-error` (non-blocking); the required macOS gate is
+`macos-14` (arm64).
 
-**Acceptance criteria (unchanged):** committed CI config for the full matrix with the
-bootstrap lanes green.
+**Later (not blocking Phase 2):** add V8-linking lanes (consume the EC-2 monolith), a Linux
+debug/ASan lane (`test_plan.md` §15), and release wheels via `cibuildwheel` (§7).
 
 ### Gate
 

@@ -16,12 +16,17 @@ concurrency:
 
 jobs:
   build-test:
-    name: ${{ matrix.os }} · py${{ matrix.python }}
+    name: ${{ matrix.os }} - py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    # macos-13 (Intel) runners are scarce/being retired and can queue for a long
+    # time. It is kept only for redundant Intel-mac coverage and is NON-BLOCKING:
+    # macOS is gated by macos-14 (arm64). See docs/dependency_strategy.md §11 EC-3.
+    continue-on-error: ${{ matrix.os == 'macos-13' }}
     strategy:
       fail-fast: false
       matrix:
-        # x86-64 everywhere + macOS arm64 (macos-14) and macOS x64 (macos-13).
+        # x86-64 everywhere + macOS arm64 (macos-14, required gate) and macOS x64
+        # (macos-13, non-blocking redundant coverage).
         os: [ubuntu-latest, windows-latest, macos-14, macos-13]
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
