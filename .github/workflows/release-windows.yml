@@ -1,0 +1,100 @@
+name: release-windows
+
+# Phase 9 / C: build Windows x64 wheels (cp311-cp314) with V8 linked, on
+# GitHub's windows-latest runner (local Windows depot_tools is blocked by
+# background/console constraints in the dev harness). V8 monolith is cached.
+# macOS is intentionally NOT built.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+    # Bring-up trigger: iterate the Windows pipeline when its inputs change.
+    branches:
+      - master
+    paths:
+      - 'tools/fetch_v8_windows.bat'
+      - 'tools/build_v8_windows.bat'
+      - '.github/workflows/release-windows.yml'
+      - 'cmake/v8_link.cmake'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build-v8:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache V8 monolith (windows)
+        id: v8cache
+        uses: actions/cache@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
+      - name: Fetch + build V8 monolith (cache miss only)
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        shell: cmd
+        env:
+          WORK: C:\v8
+        run: |
+          call tools\fetch_v8_windows.bat || exit /b 1
+          call tools\build_v8_windows.bat || exit /b 1
+
+  wheels:
+    needs: build-v8
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore V8 monolith (cache)
+        uses: actions/cache@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Put clang-cl on PATH
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\LLVM\bin"
+      - name: Build + repair + test wheel
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip delvewheel "pytest>=7"
+          python -m pip wheel . --no-deps -w dist
+          $whl = (Get-ChildItem dist\*.whl)[0].FullName
+          python -m delvewheel repair "$whl" -w wheelhouse
+          $rep = (Get-ChildItem wheelhouse\*.whl)[0].FullName
+          python -m pip install "$rep"
+          Push-Location $env:RUNNER_TEMP
+          python -c "import iv8; assert iv8._v8_linked, 'V8 not linked'; print('win', iv8._v8_runtime_version)"
+          python -m pytest "$env:GITHUB_WORKSPACE\test"
+          Pop-Location
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iv8-windows-wheel-cp${{ matrix.python }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  publish:
+    needs: wheels
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all Windows wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: iv8-windows-wheel-*
+          path: dist
+          merge-multiple: true
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl

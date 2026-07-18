@@ -2,18 +2,23 @@
 #
 # Only EXPLICIT, in-repo paths are accepted — no system/fuzzy V8 discovery.
 # Configuration FAILS (never silently falls back) if the artifact is missing.
-# The artifact is produced by tools/build_v8_linux.sh (docs §5.5, §11 EC-2) and
-# cached under data/v8/ (git-ignored).
+# The artifact is produced per platform: tools/build_v8_linux.sh /
+# build_v8_manylinux.sh (Linux) or tools/build_v8_windows.bat (Windows), cached
+# under data/v8/ (git-ignored).
 
 function(iv8_link_v8_monolith target)
   set(v8_root "${CMAKE_SOURCE_DIR}/data/v8")
-  set(v8_lib "${v8_root}/lib/libv8_monolith.a")
   set(v8_inc "${v8_root}/include")
+  if(WIN32)
+    set(v8_lib "${v8_root}/lib/v8_monolith.lib")
+  else()
+    set(v8_lib "${v8_root}/lib/libv8_monolith.a")
+  endif()
 
   if(NOT EXISTS "${v8_lib}")
     message(FATAL_ERROR
       "IV8_LINK_V8=ON but the V8 monolith is missing:\n  ${v8_lib}\n"
-      "Build it with tools/build_v8_linux.sh (see docs/dependency_strategy.md §11 EC-2), "
+      "Build it with the platform's tools/build_v8_* script (docs §11 EC-2), "
       "or configure with -DIV8_LINK_V8=OFF for the V8-free skeleton.")
   endif()
   if(NOT EXISTS "${v8_inc}/v8.h")
@@ -32,12 +37,17 @@ function(iv8_link_v8_monolith target)
     V8_COMPRESS_POINTERS
     V8_31BIT_SMIS_ON_64BIT_ARCH)
 
-  find_package(Threads REQUIRED)
-  target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
-
-  # V8 uses sized __atomic_* builtins that live in libatomic on Linux; without
-  # it the extension fails to load with "undefined symbol: __atomic_*".
-  if(UNIX AND NOT APPLE)
-    target_link_libraries(${target} PRIVATE atomic)
+  if(WIN32)
+    # System libraries the V8 monolith depends on when embedded on Windows.
+    target_link_libraries(${target} PRIVATE
+      winmm dbghelp advapi32 shlwapi ws2_32 userenv)
+  else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    # V8 uses sized __atomic_* builtins that live in libatomic on Linux; without
+    # it the extension fails to load with "undefined symbol: __atomic_*".
+    if(UNIX AND NOT APPLE)
+      target_link_libraries(${target} PRIVATE atomic)
+    endif()
   endif()
 endfunction()
