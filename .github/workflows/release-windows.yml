@@ -66,6 +66,11 @@ jobs:
         run: Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\LLVM\bin"
       - name: Build + repair + test wheel
         shell: pwsh
+        env:
+          # Force Ninja + clang-cl (the pyproject win32 override sets clang-cl).
+          # The default VS/MSBuild generator did not apply /std:c++20 to the V8
+          # headers ("C++20 or later required").
+          CMAKE_GENERATOR: Ninja
         run: |
           python -m pip install --upgrade pip delvewheel "pytest>=7"
           python -m pip wheel . --no-deps -w dist
