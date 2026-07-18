@@ -52,14 +52,21 @@ function(iv8_link_v8_monolith target)
     file(READ "${v8_config_site}/__config_site" _v8_cfgsite)
     message(STATUS "V8 libc++ __config_site:\n${_v8_cfgsite}")
 
-    # Use V8's libc++ headers instead of MSVC STL. SYSTEM => clang-cl -imsvc,
-    # searched before the toolchain's INCLUDE (so libc++ wins); -nostdinc++
-    # drops MSVC's C++ header path entirely (UCRT C headers still come from MSVC).
-    target_include_directories(${target} SYSTEM BEFORE PRIVATE
+    # Use V8's libc++ headers instead of MSVC STL. Plain -I (BEFORE, non-SYSTEM)
+    # so libc++ is searched first — ahead of clang's builtin/C headers too, which
+    # libc++'s own <stddef.h> etc. require (SYSTEM/-imsvc landed after builtins
+    # and broke <cstddef>). /clang:-nostdinc++ then drops MSVC's C++ header path
+    # (clang-cl ignores a bare -nostdinc++); UCRT C headers still come from MSVC.
+    # __config_site supplies the ABI-critical macros (namespace __Cr, ABI v2) but
+    # NOT _LIBCPP_HARDENING_MODE (V8 sets that on the command line) — define it
+    # here; hardening mode is layout-neutral, so any value is ABI-compatible.
+    target_include_directories(${target} BEFORE PRIVATE
       "${v8_config_site}"
       "${v8_libcxx}/libcxx-include"
       "${v8_libcxx}/libcxxabi-include")
-    target_compile_options(${target} PRIVATE -nostdinc++)
+    target_compile_options(${target} PRIVATE /clang:-nostdinc++)
+    target_compile_definitions(${target} PRIVATE
+      _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE)
 
     file(GLOB v8_libcxx_libs "${v8_root}/lib/libc++*.lib")
     if(v8_libcxx_libs)
