@@ -27,10 +27,10 @@ echo ==^> write args.gn
   echo v8_use_external_startup_data = false
   echo v8_enable_i18n_support = false
   echo v8_enable_temporal_support = false
-  echo use_custom_libcxx = false
-  echo v8_enable_sandbox = false
-  echo v8_enable_static_roots = false
-  echo v8_enable_pointer_compression = false
+  REM Official Windows config: V8's bundled libc++ + sandbox (+ default pointer
+  REM compression / static roots). Our earlier non-official combo (MSVC STL +
+  REM sandbox off) hit systemic Torque/MSVC-ABI object-layout asserts.
+  echo use_custom_libcxx = true
   echo treat_warnings_as_errors = false
   echo symbol_level = 1
 )
