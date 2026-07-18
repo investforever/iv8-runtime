@@ -29,13 +29,17 @@ function(iv8_link_v8_monolith target)
   target_include_directories(${target} PRIVATE "${v8_inc}")
   target_link_libraries(${target} PRIVATE "${v8_lib}")
 
-  # IV8_WITH_V8 gates the EngineRuntime code paths. The V8_COMPRESS_POINTERS /
-  # V8_31BIT_SMIS_ON_64BIT_ARCH defines are ABI-affecting and MUST match how the
-  # monolith was built (docs §5.5: pointer compression on, sandbox off).
-  target_compile_definitions(${target} PRIVATE
-    IV8_WITH_V8
-    V8_COMPRESS_POINTERS
-    V8_31BIT_SMIS_ON_64BIT_ARCH)
+  # IV8_WITH_V8 gates the EngineRuntime code paths.
+  target_compile_definitions(${target} PRIVATE IV8_WITH_V8)
+  # ABI-affecting pointer-compression defines MUST match the monolith. Linux
+  # builds with pointer compression ON; the Windows monolith builds with it OFF
+  # (v8_enable_pointer_compression=false) to avoid an MSVC-ABI object-layout
+  # mismatch, so the defines are Linux-only.
+  if(NOT WIN32)
+    target_compile_definitions(${target} PRIVATE
+      V8_COMPRESS_POINTERS
+      V8_31BIT_SMIS_ON_64BIT_ARCH)
+  endif()
 
   if(WIN32)
     # System libraries the V8 monolith depends on when embedded on Windows.

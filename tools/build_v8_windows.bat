@@ -30,6 +30,7 @@ echo ==^> write args.gn
   echo use_custom_libcxx = false
   echo v8_enable_sandbox = false
   echo v8_enable_static_roots = false
+  echo v8_enable_pointer_compression = false
   echo treat_warnings_as_errors = false
   echo symbol_level = 1
 )
