@@ -29,14 +29,38 @@ function(iv8_link_v8_monolith target)
   target_include_directories(${target} PRIVATE "${v8_inc}")
   target_link_libraries(${target} PRIVATE "${v8_lib}")
 
-  # On Windows the monolith is built against V8's bundled libc++
-  # (use_custom_libcxx=true) but does NOT archive libc++'s compiled runtime, so
-  # the embedder must also link the staged libc++[/abi] archives. They live in
-  # libc++'s own inline namespace (std::__Cr), distinct from the extension's
-  # MSVC STL, so the two coexist without ODR conflict. Link them AFTER the
-  # monolith: lld-link resolves static archives left-to-right and it is the
-  # monolith that references these symbols.
+  # On Windows the monolith is built with V8's bundled libc++
+  # (use_custom_libcxx=true). V8's PUBLIC API passes std:: types across the
+  # boundary (e.g. v8::platform::NewDefaultPlatform returns std::unique_ptr), so
+  # the extension MUST be compiled against that SAME libc++ — MSVC STL yields a
+  # different mangled name and the symbol is undefined at link. We therefore:
+  #   (a) compile the extension with V8's libc++ headers + __config_site (so
+  #       libc++ self-configures to the monolith's ABI: namespace __Cr, etc.);
+  #   (b) link libc++'s compiled runtime, archived by build_v8_windows.bat into
+  #       libc++.lib, AFTER the monolith (lld-link resolves archives L->R and it
+  #       is the monolith that references these symbols).
   if(WIN32)
+    set(v8_libcxx "${v8_root}/libcxx")
+    set(v8_config_site "${v8_libcxx}/buildtools-libc++")
+    if(NOT EXISTS "${v8_config_site}/__config_site")
+      message(FATAL_ERROR
+        "IV8_LINK_V8=ON (Windows) but V8's libc++ __config_site is missing:\n"
+        "  ${v8_config_site}/__config_site\n"
+        "Rebuild V8 with tools/build_v8_windows.bat (which stages libc++ headers).")
+    endif()
+    # Diagnostic: surface the exact ABI configuration libc++ will self-apply.
+    file(READ "${v8_config_site}/__config_site" _v8_cfgsite)
+    message(STATUS "V8 libc++ __config_site:\n${_v8_cfgsite}")
+
+    # Use V8's libc++ headers instead of MSVC STL. SYSTEM => clang-cl -imsvc,
+    # searched before the toolchain's INCLUDE (so libc++ wins); -nostdinc++
+    # drops MSVC's C++ header path entirely (UCRT C headers still come from MSVC).
+    target_include_directories(${target} SYSTEM BEFORE PRIVATE
+      "${v8_config_site}"
+      "${v8_libcxx}/libcxx-include"
+      "${v8_libcxx}/libcxxabi-include")
+    target_compile_options(${target} PRIVATE -nostdinc++)
+
     file(GLOB v8_libcxx_libs "${v8_root}/lib/libc++*.lib")
     if(v8_libcxx_libs)
       target_link_libraries(${target} PRIVATE ${v8_libcxx_libs})
