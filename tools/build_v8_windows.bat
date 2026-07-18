@@ -56,8 +56,9 @@ REM shared_ptr/verbose_abort helpers) are emitted as loose .obj files and are
 REM NOT archived into v8_monolith.lib, so the extension link fails on undefined
 REM std::__Cr::* symbols. Archive those objects into libc++.lib ourselves (with
 REM V8's bundled llvm-lib) and stage it; cmake/v8_link.cmake links it after the
-REM monolith. libc++'s __Cr inline namespace keeps it ABI-distinct from the
-REM extension's MSVC STL, so the two runtimes coexist.
+REM monolith. The extension is compiled against this SAME libc++ (see the staged
+REM headers below), so V8 public APIs that pass std:: types (e.g.
+REM NewDefaultPlatform returning std::unique_ptr) match the monolith's ABI.
 REM Locate llvm-lib: the standalone LLVM on the runner (used by the wheels job),
 REM then V8's bundled clang, then PATH.
 set "LLVMLIB=C:\Program Files\LLVM\bin\llvm-lib.exe"
@@ -69,6 +70,27 @@ if exist "%OUT%\libcxx_objs.rsp" del /q "%OUT%\libcxx_objs.rsp"
 for %%F in ("%LCXXOBJ%\*.obj") do echo "%%F">>"%OUT%\libcxx_objs.rsp"
 echo ==^> archive libc++ runtime objects into libc++.lib
 "%LLVMLIB%" /nologo /out:"%DATA%\lib\libc++.lib" @"%OUT%\libcxx_objs.rsp" || exit /b 1
+
+REM Stage V8's bundled libc++ / libc++abi headers so the extension can be
+REM compiled against the SAME standard library the monolith uses (single ABI on
+REM libc++). Copy whole trees to be robust to the exact -isystem layout; the
+REM extension build (pyproject/cmake, Windows) points -isystem into these.
+echo ==^> stage libc++ headers
+mkdir "%DATA%\libcxx"
+if exist "third_party\libc++\src\include\vector" xcopy /e /i /y /q "third_party\libc++\src\include" "%DATA%\libcxx\libcxx-include" >nul
+if exist "third_party\libc++abi\src\include\cxxabi.h" xcopy /e /i /y /q "third_party\libc++abi\src\include" "%DATA%\libcxx\libcxxabi-include" >nul
+if exist "buildtools\third_party\libc++" xcopy /e /i /y /q "buildtools\third_party\libc++" "%DATA%\libcxx\buildtools-libc++" >nul
+
+echo ==^> DIAG: libc++ header source locations under checkout
+dir /b "third_party\libc++\src\include" 2>nul | findstr /i "vector __config"
+dir /b "buildtools\third_party\libc++" 2>nul
+echo ==^> DIAG: __config_site locations
+where /r "%WORK%\v8" __config_site 2>nul
+where /r "%OUT%" __config_site 2>nul
+echo ==^> DIAG: libc++ compile command (exact -isystem / -D / -std for extension)
+call ninja -C "%OUT%" -t commands obj/buildtools/third_party/libc++/libc++/ios.obj 2>nul | findstr /i "ios.obj"
+echo ==^> DIAG: gn args (alloc / shim / libcxx)
+call gn args "%OUT%" --list --short 2>nul | findstr /i "alloc shim libcxx custom_libcxx"
 
 xcopy /e /i /y /q "include" "%DATA%\include" >nul || exit /b 1
 copy /y "LICENSE" "%DATA%\licenses\LICENSE.v8" 2>nul
