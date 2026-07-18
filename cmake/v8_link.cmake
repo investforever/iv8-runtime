@@ -29,6 +29,25 @@ function(iv8_link_v8_monolith target)
   target_include_directories(${target} PRIVATE "${v8_inc}")
   target_link_libraries(${target} PRIVATE "${v8_lib}")
 
+  # On Windows the monolith is built against V8's bundled libc++
+  # (use_custom_libcxx=true) but does NOT archive libc++'s compiled runtime, so
+  # the embedder must also link the staged libc++[/abi] archives. They live in
+  # libc++'s own inline namespace (std::__Cr), distinct from the extension's
+  # MSVC STL, so the two coexist without ODR conflict. Link them AFTER the
+  # monolith: lld-link resolves static archives left-to-right and it is the
+  # monolith that references these symbols.
+  if(WIN32)
+    file(GLOB v8_libcxx_libs "${v8_root}/lib/libc++*.lib")
+    if(v8_libcxx_libs)
+      target_link_libraries(${target} PRIVATE ${v8_libcxx_libs})
+    else()
+      message(FATAL_ERROR
+        "IV8_LINK_V8=ON (Windows) but no staged libc++ runtime archive was "
+        "found in ${v8_root}/lib. The V8 monolith needs it; rebuild V8 with "
+        "tools/build_v8_windows.bat (which stages libc++*.lib).")
+    endif()
+  endif()
+
   # IV8_WITH_V8 gates the EngineRuntime code paths. The remaining defines are
   # ABI-affecting and MUST match how the monolith was built. Both platforms build
   # with pointer compression ON. Windows uses V8's official config (sandbox ON);

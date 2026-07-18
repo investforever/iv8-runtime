@@ -42,6 +42,18 @@ call gn gen "%OUT%" || exit /b 1
 echo ==^> ninja v8_monolith
 call ninja -C "%OUT%" v8_monolith || exit /b 1
 
+REM The monolith is built against V8's bundled libc++ (use_custom_libcxx=true),
+REM but v8_monolith.lib does NOT archive libc++'s compiled runtime (ios/locale/
+REM hashtable/shared_ptr helpers). The embedder must link that runtime lib too,
+REM so build it explicitly and stage it beside the monolith. Target-name
+REM variations are tolerated; the glob below stages whatever .lib was produced.
+echo ==^> ninja libc++ runtime
+call ninja -C "%OUT%" "buildtools/third_party/libc++:libc++" 2>nul
+call ninja -C "%OUT%" "buildtools/third_party/libc++abi:libc++abi" 2>nul
+
+echo ==^> DIAG: libc++ artifacts under out tree
+dir /s /b "%OUT%\obj\buildtools" 2>nul | findstr /i "libc++ libcxx c++.lib"
+
 echo ==^> stage artifact into data\v8
 set "DATA=%REPO%\data\v8"
 if exist "%DATA%" rmdir /s /q "%DATA%"
@@ -49,12 +61,15 @@ mkdir "%DATA%\lib"
 mkdir "%DATA%\include"
 mkdir "%DATA%\licenses"
 copy /y "%OUT%\obj\v8_monolith.lib" "%DATA%\lib\" || exit /b 1
+REM Stage the custom libc++ (+abi) runtime archives wherever ninja emitted them.
+for /r "%OUT%" %%F in (libc++*.lib) do copy /y "%%F" "%DATA%\lib\" >nul
+for /r "%OUT%" %%F in (libc++abi*.lib) do copy /y "%%F" "%DATA%\lib\" >nul
 xcopy /e /i /y /q "include" "%DATA%\include" >nul || exit /b 1
 copy /y "LICENSE" "%DATA%\licenses\LICENSE.v8" 2>nul
 > "%DATA%\BUILD_INFO.txt" (
   echo V8_VERSION=15.0.245.19
   echo V8_COMMIT=209c9cea0db17d8caf23e9d2c7de08c351609744
-  echo GN_ARGS=monolithic,for_shared_library,static,i18n_off,temporal_off,use_custom_libcxx_false,sandbox_off
+  echo GN_ARGS=monolithic,for_shared_library,static,i18n_off,temporal_off,use_custom_libcxx_true,sandbox_on,pointer_compression_on
   echo PLATFORM=windows_x86_64
 )
 echo ==^> WIN_BUILD_DONE
