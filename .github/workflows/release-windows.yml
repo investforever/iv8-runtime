@@ -10,15 +10,6 @@ on:
   push:
     tags:
       - 'v*'
-    # Bring-up trigger: iterate the Windows pipeline when its inputs change.
-    branches:
-      - master
-    paths:
-      - 'tools/fetch_v8_windows.bat'
-      - 'tools/build_v8_windows.bat'
-      - '.github/workflows/release-windows.yml'
-      - 'cmake/v8_link.cmake'
-      - 'CMakeLists.txt'
 
 permissions:
   contents: write

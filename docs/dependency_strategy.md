@@ -532,6 +532,22 @@ scikit-build-core override in `pyproject.toml`
 static-lib↔extension boundary) is validated on this host. This is the exact linkage shape
 the future clang-cl `v8_monolith` will use.
 
+> **⚠️ Superseded during Phase 9 C (2026-07-18) — Windows is single-ABI on _libc++_, not MSVC STL.**
+> The spike above used a synthetic static lib. When the **real** V8 15.0 monolith was built
+> on Windows, MSVC STL proved unusable: V8's checked-in Torque object-layout `static_assert`s
+> fail against the MSVC C++ ABI (independent of MSVC version, static-roots, or pointer
+> compression). V8 15.0 on Windows is **clang-cl + bundled libc++ only** (its official
+> config). Because V8's *public* API passes `std::` types across the boundary
+> (`v8::platform::NewDefaultPlatform` returns `std::unique_ptr`), the extension **must**
+> compile against that same libc++ — an MSVC-STL extension gets a different mangled name and
+> the symbol is undefined at link. So the Windows single-ABI is **clang-cl + libc++**: the
+> extension is built with V8's staged libc++ headers + `__config_site` (ABI namespace `__Cr`,
+> `_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS`, `/clang:-nostdinc++`), links the archived
+> `libc++.lib` + `msvcprt.lib` (for `__ExceptionPtr*`), and V8 is built with the allocator
+> shim off so it does not export a conflicting `free`. Result: cp311–cp314 win_amd64 wheels,
+> 84 passed / 1 skipped (parity with Linux). See `tools/build_v8_windows.bat`,
+> `cmake/v8_link.cmake`, and the phased record in the auto-memory workflow file.
+
 ### EC-2 — Linux x86-64 V8 build environment — ✅ SATISFIED (2026-07-16)
 
 **Goal:** a reproducible environment that produces `libv8_monolith.a` + headers from the

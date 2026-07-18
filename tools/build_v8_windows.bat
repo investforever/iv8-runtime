@@ -88,17 +88,6 @@ if exist "third_party\libc++\src\include\vector" xcopy /e /i /y /q "third_party\
 if exist "third_party\libc++abi\src\include\cxxabi.h" xcopy /e /i /y /q "third_party\libc++abi\src\include" "%DATA%\libcxx\libcxxabi-include" >nul
 if exist "buildtools\third_party\libc++" xcopy /e /i /y /q "buildtools\third_party\libc++" "%DATA%\libcxx\buildtools-libc++" >nul
 
-echo ==^> DIAG: libc++ header source locations under checkout
-dir /b "third_party\libc++\src\include" 2>nul | findstr /i "vector __config"
-dir /b "buildtools\third_party\libc++" 2>nul
-echo ==^> DIAG: __config_site locations
-where /r "%WORK%\v8" __config_site 2>nul
-where /r "%OUT%" __config_site 2>nul
-echo ==^> DIAG: libc++ compile command (exact -isystem / -D / -std for extension)
-call ninja -C "%OUT%" -t commands obj/buildtools/third_party/libc++/libc++/ios.obj 2>nul | findstr /i "ios.obj"
-echo ==^> DIAG: gn args (alloc / shim / libcxx)
-call gn args "%OUT%" --list --short 2>nul | findstr /i "alloc shim libcxx custom_libcxx"
-
 xcopy /e /i /y /q "include" "%DATA%\include" >nul || exit /b 1
 copy /y "LICENSE" "%DATA%\licenses\LICENSE.v8" 2>nul
 > "%DATA%\BUILD_INFO.txt" (

@@ -48,9 +48,7 @@ function(iv8_link_v8_monolith target)
         "  ${v8_config_site}/__config_site\n"
         "Rebuild V8 with tools/build_v8_windows.bat (which stages libc++ headers).")
     endif()
-    # Diagnostic: surface the exact ABI configuration libc++ will self-apply.
-    file(READ "${v8_config_site}/__config_site" _v8_cfgsite)
-    message(STATUS "V8 libc++ __config_site:\n${_v8_cfgsite}")
+    message(STATUS "iv8: compiling Windows extension against V8's libc++ (${v8_libcxx})")
 
     # Use V8's libc++ headers instead of MSVC STL. Plain -I (BEFORE, non-SYSTEM)
     # so libc++ is searched first — ahead of clang's builtin/C headers too, which
