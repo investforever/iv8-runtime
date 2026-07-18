@@ -6,7 +6,7 @@
 
 #include <pybind11/pybind11.h>
 
-#include "v8.h"
+#include "iv8/v8_headers.h"
 
 namespace iv8 {
 
