@@ -65,8 +65,14 @@ function(iv8_link_v8_monolith target)
       "${v8_libcxx}/libcxx-include"
       "${v8_libcxx}/libcxxabi-include")
     target_compile_options(${target} PRIVATE /clang:-nostdinc++)
+    # __config_site marks _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS as GN-arg-set
+    # (not baked in). V8 builds libc++ static and defines it on the command line;
+    # without it the headers annotate symbols __declspec(dllimport) (expecting a
+    # libc++ DLL) and the static libc++.lib symbols go unresolved. Hardening mode
+    # is likewise cmdline-set and layout-neutral (any value is ABI-compatible).
     target_compile_definitions(${target} PRIVATE
-      _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE)
+      _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE
+      _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS)
 
     file(GLOB v8_libcxx_libs "${v8_root}/lib/libc++*.lib")
     if(v8_libcxx_libs)
@@ -94,8 +100,12 @@ function(iv8_link_v8_monolith target)
 
   if(WIN32)
     # System libraries the V8 monolith depends on when embedded on Windows.
+    # msvcprt (MSVC C++ runtime import lib) provides the __ExceptionPtr* functions
+    # that libc++ forwards std::exception_ptr to on Windows (_LIBCPP_NO_VCRUNTIME
+    # is left undefined, matching the monolith). It is listed AFTER libc++.lib so
+    # libc++'s std:: definitions win on demand and MSVC STL symbols are not pulled.
     target_link_libraries(${target} PRIVATE
-      winmm dbghelp advapi32 shlwapi ws2_32 userenv)
+      winmm dbghelp advapi32 shlwapi ws2_32 userenv msvcprt)
   else()
     find_package(Threads REQUIRED)
     target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
