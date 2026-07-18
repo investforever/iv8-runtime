@@ -31,6 +31,13 @@ echo ==^> write args.gn
   REM compression / static roots). Our earlier non-official combo (MSVC STL +
   REM sandbox off) hit systemic Torque/MSVC-ABI object-layout asserts.
   echo use_custom_libcxx = true
+  REM Do not let V8 hijack the process allocator: its allocator shim exports the
+  REM C malloc/free, which collide with the CRT's when embedded in a Python .pyd
+  REM (lld-link "duplicate symbol: free"). Turn the shim + PA-as-malloc off so V8
+  REM uses the system allocator; the sandbox still uses PartitionAlloc for its
+  REM heap (use_partition_alloc stays on).
+  echo use_allocator_shim = false
+  echo use_partition_alloc_as_malloc = false
   echo treat_warnings_as_errors = false
   echo symbol_level = 1
 )
@@ -97,7 +104,7 @@ copy /y "LICENSE" "%DATA%\licenses\LICENSE.v8" 2>nul
 > "%DATA%\BUILD_INFO.txt" (
   echo V8_VERSION=15.0.245.19
   echo V8_COMMIT=209c9cea0db17d8caf23e9d2c7de08c351609744
-  echo GN_ARGS=monolithic,for_shared_library,static,i18n_off,temporal_off,use_custom_libcxx_true,sandbox_on,pointer_compression_on
+  echo GN_ARGS=monolithic,for_shared_library,static,i18n_off,temporal_off,use_custom_libcxx_true,sandbox_on,pointer_compression_on,allocator_shim_off,pa_as_malloc_off
   echo PLATFORM=windows_x86_64
 )
 echo ==^> WIN_BUILD_DONE
