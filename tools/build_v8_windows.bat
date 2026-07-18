@@ -58,12 +58,17 @@ REM std::__Cr::* symbols. Archive those objects into libc++.lib ourselves (with
 REM V8's bundled llvm-lib) and stage it; cmake/v8_link.cmake links it after the
 REM monolith. libc++'s __Cr inline namespace keeps it ABI-distinct from the
 REM extension's MSVC STL, so the two runtimes coexist.
-set "LLVMBIN=%WORK%\v8\third_party\llvm-build\Release+Asserts\bin"
+REM Locate llvm-lib: the standalone LLVM on the runner (used by the wheels job),
+REM then V8's bundled clang, then PATH.
+set "LLVMLIB=C:\Program Files\LLVM\bin\llvm-lib.exe"
+if not exist "%LLVMLIB%" set "LLVMLIB=%WORK%\v8\third_party\llvm-build\Release+Asserts\bin\llvm-lib.exe"
+if not exist "%LLVMLIB%" set "LLVMLIB=llvm-lib.exe"
+echo ==^> using llvm-lib: %LLVMLIB%
 set "LCXXOBJ=%OUT%\obj\buildtools\third_party\libc++\libc++"
 if exist "%OUT%\libcxx_objs.rsp" del /q "%OUT%\libcxx_objs.rsp"
 for %%F in ("%LCXXOBJ%\*.obj") do echo "%%F">>"%OUT%\libcxx_objs.rsp"
 echo ==^> archive libc++ runtime objects into libc++.lib
-"%LLVMBIN%\llvm-lib.exe" /nologo /out:"%DATA%\lib\libc++.lib" @"%OUT%\libcxx_objs.rsp" || exit /b 1
+"%LLVMLIB%" /nologo /out:"%DATA%\lib\libc++.lib" @"%OUT%\libcxx_objs.rsp" || exit /b 1
 
 xcopy /e /i /y /q "include" "%DATA%\include" >nul || exit /b 1
 copy /y "LICENSE" "%DATA%\licenses\LICENSE.v8" 2>nul
