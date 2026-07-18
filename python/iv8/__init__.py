@@ -10,10 +10,16 @@ Objects to ``dict`` (unsupported types / cycles / excess depth raise
 opaque, context-bound ``JSValue`` (``context_alive`` / ``type_name`` /
 ``to_py()``).
 
+M2-1 (Host Object Framework) adds a minimal ``Page`` — a container that owns one
+execution context plus native-backed host objects. It is intentionally NOT a
+full page object (no load/navigation/timers/console/browser globals yet); it
+exists to anchor the reusable host-object infrastructure.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
-``JSConversionError``, ``JSError``, ``JSUndefined``, and ``JSValue`` are exported
-in BOTH build modes so the public API shape is stable. In a V8-free skeleton
-build, ``JSContext()`` (and ``JSValue()``) raise ``RuntimeError``.
+``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
+exported in BOTH build modes so the public API shape is stable. In a V8-free
+skeleton build, ``JSContext()`` / ``JSValue()`` / ``Page()`` raise
+``RuntimeError``.
 
 Exposed module-level values (state only — there is no ``init``/``shutdown`` API):
 
@@ -41,6 +47,7 @@ from .errors import (
     JSError,
 )
 from .jsvalue import JSValue
+from .page import Page
 from .undefined import JSUndefined
 
 __all__ = [
@@ -56,6 +63,7 @@ __all__ = [
     "JSError",
     "JSUndefined",
     "JSValue",
+    "Page",
 ]
 
 

@@ -46,7 +46,10 @@ if(IV8_LINK_V8)
       src/core/value_converter.cpp
       src/core/js_exception.cpp
       src/core/js_value.cpp
-      src/binding/context_binding.cpp)
+      src/core/host_object.cpp
+      src/core/page_state.cpp
+      src/binding/context_binding.cpp
+      src/binding/page_binding.cpp)
 endif()
 
 pybind11_add_module(_core ${_iv8_sources})

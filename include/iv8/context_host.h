@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -52,6 +53,14 @@ public:
     std::string version();
     pybind11::object eval(const std::string& source, bool to_py,
                           const std::string& name);
+
+    // Run `fn` within this context's isolate / Locker / HandleScope /
+    // Context::Scope, under the operation guard (so it observes disposal and
+    // busy state like any other operation). Used by the M2 host-object
+    // framework to install host objects into the global at page setup. `fn`
+    // must touch only V8 (it runs with whatever GIL state the caller holds).
+    void with_scope(
+        const std::function<void(v8::Isolate*, v8::Local<v8::Context>)>& fn);
 
     // Explicit dispose: rejects if an operation is active (ContextBusyError),
     // otherwise runs the ordered teardown.

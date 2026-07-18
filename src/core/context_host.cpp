@@ -66,6 +66,18 @@ std::string ContextState::version() {
     return EngineRuntime::runtime_version();
 }
 
+void ContextState::with_scope(
+    const std::function<void(v8::Isolate*, v8::Local<v8::Context>)>& fn) {
+    OperationScope guard(*this);
+    v8::Isolate* isolate = isolate_host_->isolate();
+    v8::Locker locker(isolate);
+    v8::Isolate::Scope isolate_scope(isolate);
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Context> context = context_.Get(isolate);
+    v8::Context::Scope context_scope(context);
+    fn(isolate, context);
+}
+
 std::uint64_t ContextState::retain_value(v8::Local<v8::Value> value) {
     std::lock_guard<std::mutex> table_lock(table_mutex_);
     const std::uint64_t id = next_id_++;
