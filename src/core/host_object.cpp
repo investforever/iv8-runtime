@@ -12,15 +12,19 @@ v8::Local<v8::String> v8str(v8::Isolate* isolate, const std::string& s) {
         .ToLocalChecked();
 }
 
-// Recover the native HostObject* stored in the receiver's internal field. Fails
-// safe (nullptr) if the receiver is not a host object (e.g. a derived object
-// without the internal field), so a stray access returns JS undefined rather
-// than dereferencing garbage.
+// Recover the native HostObject* stored in the receiver's internal field (as a
+// v8::External). Fails safe (nullptr) if the receiver is not a host object (e.g.
+// a derived object without the internal field, or the field not yet set), so a
+// stray access returns JS undefined rather than dereferencing garbage.
 HostObject* backing_of(v8::Local<v8::Object> self) {
     if (self.IsEmpty() || self->InternalFieldCount() < 1) {
         return nullptr;
     }
-    return static_cast<HostObject*>(self->GetAlignedPointerFromInternalField(0));
+    v8::Local<v8::Value> field = self->GetInternalField(0).As<v8::Value>();
+    if (field.IsEmpty() || !field->IsExternal()) {
+        return nullptr;
+    }
+    return static_cast<HostObject*>(field.As<v8::External>()->Value());
 }
 
 // One generic accessor for every native property: dispatches by the property
@@ -28,7 +32,7 @@ HostObject* backing_of(v8::Local<v8::Object> self) {
 void property_getter(v8::Local<v8::Name> property,
                      const v8::PropertyCallbackInfo<v8::Value>& info) {
     v8::Isolate* isolate = info.GetIsolate();
-    HostObject* host = backing_of(info.This());
+    HostObject* host = backing_of(info.Holder());
     if (host == nullptr) {
         return;
     }
@@ -70,7 +74,7 @@ void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
     }
 
     v8::Local<v8::Object> object = tmpl->NewInstance(context).ToLocalChecked();
-    object->SetAlignedPointerInInternalField(0, host);
+    object->SetInternalField(0, v8::External::New(isolate, host));
     (void)context->Global()->Set(context, v8str(isolate, host->global_name()),
                                  object);
 }
