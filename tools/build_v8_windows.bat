@@ -29,6 +29,7 @@ echo ==^> write args.gn
   echo v8_enable_temporal_support = false
   echo use_custom_libcxx = false
   echo v8_enable_sandbox = false
+  echo v8_enable_static_roots = false
   echo treat_warnings_as_errors = false
   echo symbol_level = 1
 )
