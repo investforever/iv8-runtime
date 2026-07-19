@@ -42,7 +42,11 @@ JS-side writes on elements — ``element.textContent = ...`` and
 ``element.setAttribute("id"|"class", value)`` — acting on the minimal internal
 tree (no append/remove, no full attribute system). These are all JS globals
 reachable via ``Page.eval``; M2-6…M2-8 add NO new Python API and no Python
-document/element type.
+document/element type. M3-1 (External Script Loading) extends ``Page.load`` with
+an optional ``scripts`` list — mappings of ``name`` + ``code`` executed
+synchronously in order in the loaded generation (each ``name`` is its resource
+name; a failure raises the existing ``JSError``). No network, no ``<script
+src>``; the only public change is the ``Page.load(scripts=...)`` parameter.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

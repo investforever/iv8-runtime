@@ -18,10 +18,37 @@ The public API shape is identical in both build modes: when V8 is linked,
 ``Page()`` raises ``RuntimeError`` (mirroring ``JSContext``).
 """
 
+from collections.abc import Mapping
+
 from . import _core
 from .errors import JSContextDisposedError
 
 __all__ = ["Page"]
+
+
+def _normalize_scripts(scripts):
+    """Validate the M3-1 ``scripts`` input and return a list of (name, code).
+
+    ``scripts`` must be ``None`` (or omitted) or a ``list`` of mappings, each with
+    string ``name`` and ``code`` keys (extra keys are ignored). Any type error
+    raises ``TypeError`` before any page state is touched.
+    """
+    if scripts is None:
+        return []
+    if not isinstance(scripts, list):
+        raise TypeError("scripts must be a list")
+    normalized = []
+    for index, item in enumerate(scripts):
+        if not isinstance(item, Mapping):
+            raise TypeError(f"scripts[{index}] must be a mapping")
+        name = item.get("name")
+        code = item.get("code")
+        if not isinstance(name, str):
+            raise TypeError(f"scripts[{index}]['name'] must be a str")
+        if not isinstance(code, str):
+            raise TypeError(f"scripts[{index}]['code'] must be a str")
+        normalized.append((name, code))
+    return normalized
 
 
 class Page:
@@ -81,13 +108,24 @@ class Page:
         """
         self._native.run_jobs()
 
-    def load(self, html: str, base_url: str) -> None:
+    def load(self, html: str, base_url: str, scripts=None) -> None:
         """Refresh the page state from static HTML and a base URL.
 
         Replaces the current page state: the JS context is rebuilt (globals reset)
         and ``location`` is re-derived from ``base_url``. ``html`` is captured as
-        internal document-bootstrap state (no public document surface yet). This
-        is NOT a real navigation/loader — no network, subresources, or history.
+        internal document-bootstrap state. This is NOT a real navigation/loader —
+        no network, subresources, or history.
+
+        M3-1 external scripts (optional): ``scripts`` is a ``list`` of mappings,
+        each with string ``name`` and ``code``. After the page generation is
+        installed, the scripts are executed **synchronously, in order**, in the
+        newly loaded context (so a later script sees globals defined by earlier
+        ones). Each script's ``name`` is its resource/origin name, so a failure
+        surfaces as ``JSError`` with ``resource_name == name``. There is no
+        rollback: if a script fails the exception propagates and the page keeps
+        whatever earlier scripts already did. Timers/jobs scheduled by scripts do
+        NOT run in the background — only ``run_timers()`` / ``run_jobs()`` execute
+        them. ``scripts=None`` / ``[]`` is exactly the M2 load path.
 
         Repeated calls replace the prior page state; a retained ``JSValue`` from a
         previous load follows the usual disposed/invalidation rules. Raises
@@ -98,7 +136,14 @@ class Page:
             raise TypeError("html must be a str")
         if not isinstance(base_url, str):
             raise TypeError("base_url must be a str")
+        # Validate scripts before touching page state (bad input must not reload).
+        normalized = _normalize_scripts(scripts)
         self._native.load(html, base_url)
+        # Execute host-provided scripts in order, in the freshly installed
+        # generation. eval reuses the existing JSError path (resource_name = name)
+        # and shares globals across scripts; a failure propagates (no rollback).
+        for name, code in normalized:
+            self._native.eval(code, False, name)
 
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""
