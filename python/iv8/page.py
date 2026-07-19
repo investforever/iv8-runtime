@@ -81,25 +81,6 @@ class Page:
         """
         self._native.run_jobs()
 
-    @property
-    def document(self):
-        """A read-only snapshot ``Document`` for the current page state.
-
-        Exposes ``url`` / ``base_uri`` / ``title`` (properties) and ``html()`` /
-        ``text()`` (methods), all derived from the most recent ``load()`` (or the
-        default page). ``title`` and ``text()`` are MINIMAL string
-        extraction/transform — not an HTML/DOM parser, and ``text()`` is not a
-        browser-equivalent ``textContent``. There is no Node/Element/selector/
-        mutation surface.
-
-        The returned document is bound to the current page generation: after a
-        subsequent ``load()`` or ``dispose()`` it is invalidated and every read
-        raises ``JSContextDisposedError`` (the same rule as a retained
-        ``JSValue``). Accessing ``page.document`` after ``dispose()`` likewise
-        raises ``JSContextDisposedError``.
-        """
-        return self._native.document()
-
     def load(self, html: str, base_url: str) -> None:
         """Refresh the page state from static HTML and a base URL.
 

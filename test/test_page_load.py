@@ -38,7 +38,7 @@ def test_no_document_or_navigation_api_leaked():
     for name in ("document", "navigator", "location", "history"):
         assert not hasattr(iv8, name)
     for forbidden in ("navigate", "reload", "goto", "assign", "replace",
-                      "querySelector", "getElementById"):
+                      "document", "querySelector", "getElementById"):
         assert not hasattr(iv8.Page, forbidden)
 
 
