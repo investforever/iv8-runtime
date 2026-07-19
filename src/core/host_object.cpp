@@ -65,8 +65,15 @@ void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
     tmpl->SetInternalFieldCount(1);  // slot 0 = HostObject* (aligned pointer)
 
+    // Host-object data properties are getter-computed and read-only: ReadOnly
+    // makes a JS write a no-op (sloppy) / TypeError (strict) instead of shadowing
+    // the accessor with a writable value; DontDelete keeps them present. Without
+    // ReadOnly the default (None) attribute is writable.
+    const v8::PropertyAttribute read_only =
+        static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete);
     for (const std::string& property : host->property_names()) {
-        tmpl->SetNativeDataProperty(v8str(isolate, property), &property_getter);
+        tmpl->SetNativeDataProperty(v8str(isolate, property), &property_getter,
+                                    nullptr, v8::Local<v8::Value>(), read_only);
     }
     for (const std::string& method : host->method_names()) {
         v8::Local<v8::String> mname = v8str(isolate, method);
