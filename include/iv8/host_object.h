@@ -48,9 +48,17 @@ public:
         const v8::FunctionCallbackInfo<v8::Value>& args) = 0;
 };
 
-// Build the JS object for `host` and install it as a global property named
-// host->global_name() on `context`. Must be called inside the isolate/context
-// scopes (see ContextState::with_scope). `host` must outlive the context.
+// Build (WITHOUT installing) a JS object backed by `host`: an ObjectTemplate with
+// one internal field holding the HostObject*, read-only accessors for its
+// property_names(), and method trampolines for its method_names(). Used to return
+// host-object-backed values (e.g. DOM elements) from other host callbacks. Must
+// run inside the isolate/context scopes; `host` must outlive the returned object.
+v8::Local<v8::Object> make_host_object(v8::Isolate* isolate,
+                                       v8::Local<v8::Context> context,
+                                       HostObject* host);
+
+// Build the JS object for `host` (via make_host_object) and install it as a
+// global property named host->global_name() on `context`.
 void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
                          HostObject* host);
 

@@ -60,8 +60,9 @@ void method_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 }  // namespace
 
-void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
-                         HostObject* host) {
+v8::Local<v8::Object> make_host_object(v8::Isolate* isolate,
+                                       v8::Local<v8::Context> context,
+                                       HostObject* host) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
     tmpl->SetInternalFieldCount(1);  // slot 0 = HostObject* (aligned pointer)
 
@@ -84,6 +85,12 @@ void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
 
     v8::Local<v8::Object> object = tmpl->NewInstance(context).ToLocalChecked();
     object->SetAlignedPointerInInternalField(0, host, kHostObjectTag);
+    return object;
+}
+
+void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                         HostObject* host) {
+    v8::Local<v8::Object> object = make_host_object(isolate, context, host);
     (void)context->Global()->Set(context, v8str(isolate, host->global_name()),
                                  object);
 }

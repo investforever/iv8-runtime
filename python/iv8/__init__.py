@@ -28,8 +28,13 @@ pump — ``Page.run_timers()`` (fire scheduled timer callbacks once) and
 only the pump executes pending work. M2-5 (Page / Load Model) adds
 ``Page.load(html=..., base_url=...)``, which refreshes the page state from static
 input: the JS context is rebuilt and ``location`` re-derives from ``base_url``
-(``html`` is captured as internal document-bootstrap state, no public document
-surface). It is not a real navigation/loader.
+(``html`` is captured as internal document-bootstrap state). It is not a real
+navigation/loader. M2-6 (Minimal Document) exposes, inside a page's JS context, a
+read-only ``document`` global (``URL`` / ``title`` / ``readyState`` /
+``documentElement`` / ``body`` / ``getElementById`` / ``querySelector`` — the
+last supporting only ``#id`` / ``tagname`` / ``.class``) plus minimal ``element``
+objects (``tagName`` / ``id`` only). These are JS globals reachable via
+``Page.eval``; M2-6 adds NO new Python API and no Python document/element type.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

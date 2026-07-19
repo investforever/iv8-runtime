@@ -1,7 +1,14 @@
 #include "iv8/page_state.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <functional>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "iv8/context_host.h"
 
@@ -292,6 +299,334 @@ private:
 // that sets this per page is a LATER phase, deliberately not done here.
 constexpr char kDefaultBaseUrl[] = "https://iv8.invalid/";
 
+// --- M2-6 minimal document --------------------------------------------------
+// A JS-global `document` host object + `element` host objects, backed by a
+// MINIMAL internal HTML tree (tag / id / class / children only). This is NOT an
+// HTML5 parser and NOT a DOM: it serves exactly documentElement / body / title /
+// getElementById / querySelector(#id | tagname | .class). No Node/Element layer,
+// no mutation, no textContent/attributes/children exposed.
+
+std::string ascii_lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+std::string ascii_upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+    });
+    return s;
+}
+
+// Inner text of the first <title>...</title> (case-insensitive tags), else "".
+std::string extract_title(const std::string& html) {
+    const std::string lower = ascii_lower(html);
+    const std::size_t open = lower.find("<title>");
+    if (open == std::string::npos) {
+        return std::string();
+    }
+    const std::size_t inner = open + 7;  // strlen("<title>")
+    const std::size_t close = lower.find("</title>", inner);
+    if (close == std::string::npos) {
+        return std::string();
+    }
+    return html.substr(inner, close - inner);
+}
+
+// A minimal HTML element node. Only what M2-6 queries need.
+struct DomNode {
+    std::string tag;                   // lowercased tag name
+    std::string id;                    // id attribute value, or ""
+    std::vector<std::string> classes;  // class tokens
+    std::vector<DomNode*> children;    // owned by the DocumentHost node pool
+};
+
+bool is_void_element(const std::string& tag) {
+    static const char* const kVoid[] = {"area", "base", "br",    "col",
+                                        "embed", "hr", "img",    "input",
+                                        "link",  "meta", "param", "source",
+                                        "track", "wbr"};
+    for (const char* v : kVoid) {
+        if (tag == v) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Capture id + class from the raw attribute text inside a start tag. Minimal
+// attribute tokenizer (quoted / bare values); ignores every other attribute.
+void parse_attributes(const std::string& attrs, std::string& id_out,
+                      std::vector<std::string>& class_out) {
+    const std::size_t n = attrs.size();
+    std::size_t i = 0;
+    while (i < n) {
+        while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+        if (i >= n) break;
+        const std::size_t name_start = i;
+        while (i < n && attrs[i] != '=' && attrs[i] != '/' &&
+               !std::isspace(static_cast<unsigned char>(attrs[i])))
+            i++;
+        const std::string name = ascii_lower(attrs.substr(name_start, i - name_start));
+        std::string value;
+        while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+        if (i < n && attrs[i] == '=') {
+            i++;
+            while (i < n && std::isspace(static_cast<unsigned char>(attrs[i]))) i++;
+            if (i < n && (attrs[i] == '"' || attrs[i] == '\'')) {
+                const char quote = attrs[i++];
+                const std::size_t vs = i;
+                while (i < n && attrs[i] != quote) i++;
+                value = attrs.substr(vs, i - vs);
+                if (i < n) i++;  // closing quote
+            } else {
+                const std::size_t vs = i;
+                while (i < n && attrs[i] != '/' &&
+                       !std::isspace(static_cast<unsigned char>(attrs[i])))
+                    i++;
+                value = attrs.substr(vs, i - vs);
+            }
+        }
+        if (name == "id") {
+            id_out = value;
+        } else if (name == "class") {
+            std::size_t j = 0;
+            const std::size_t m = value.size();
+            while (j < m) {
+                while (j < m && std::isspace(static_cast<unsigned char>(value[j]))) j++;
+                const std::size_t ts = j;
+                while (j < m && !std::isspace(static_cast<unsigned char>(value[j]))) j++;
+                if (j > ts) class_out.push_back(value.substr(ts, j - ts));
+            }
+        }
+    }
+}
+
+// Minimal tag-stack HTML parse into a node forest. Text/comments/doctype are
+// skipped; only start/end tags build structure. NOT HTML5-conformant.
+void parse_html(const std::string& html,
+                std::vector<std::unique_ptr<DomNode>>& pool,
+                std::vector<DomNode*>& roots) {
+    std::vector<DomNode*> stack;
+    const std::size_t n = html.size();
+    std::size_t i = 0;
+    while (i < n) {
+        if (html[i] != '<') {
+            i++;
+            continue;
+        }
+        if (i + 1 >= n) break;
+        const char c1 = html[i + 1];
+        if (c1 == '/') {  // end tag
+            std::size_t j = i + 2;
+            const std::size_t ns = j;
+            while (j < n && html[j] != '>' &&
+                   !std::isspace(static_cast<unsigned char>(html[j])))
+                j++;
+            const std::string name = ascii_lower(html.substr(ns, j - ns));
+            while (j < n && html[j] != '>') j++;
+            if (j < n) j++;
+            i = j;
+            for (std::size_t k = stack.size(); k-- > 0;) {
+                if (stack[k]->tag == name) {
+                    stack.resize(k);
+                    break;
+                }
+            }
+            continue;
+        }
+        if (c1 == '!') {  // comment / doctype
+            std::size_t j = i + 2;
+            while (j < n && html[j] != '>') j++;
+            if (j < n) j++;
+            i = j;
+            continue;
+        }
+        // start tag
+        std::size_t j = i + 1;
+        const std::size_t ns = j;
+        while (j < n && html[j] != '>' && html[j] != '/' &&
+               !std::isspace(static_cast<unsigned char>(html[j])))
+            j++;
+        const std::string tag = ascii_lower(html.substr(ns, j - ns));
+        const std::size_t body_start = j;
+        while (j < n && html[j] != '>') j++;
+        std::string body = html.substr(body_start, j - body_start);
+        const bool self_closing = !body.empty() && body.back() == '/';
+        if (self_closing) body.pop_back();
+        if (j < n) j++;  // past '>'
+        i = j;
+        if (tag.empty()) continue;
+
+        auto node = std::make_unique<DomNode>();
+        node->tag = tag;
+        parse_attributes(body, node->id, node->classes);
+        DomNode* raw = node.get();
+        pool.push_back(std::move(node));
+        if (stack.empty()) {
+            roots.push_back(raw);
+        } else {
+            stack.back()->children.push_back(raw);
+        }
+        if (!self_closing && !is_void_element(tag)) {
+            stack.push_back(raw);
+        }
+    }
+}
+
+const DomNode* dfs_find(const DomNode* node,
+                        const std::function<bool(const DomNode*)>& pred) {
+    if (pred(node)) return node;
+    for (const DomNode* child : node->children) {
+        if (const DomNode* found = dfs_find(child, pred)) return found;
+    }
+    return nullptr;
+}
+
+// First node (document order / pre-order) matching `pred`, or nullptr.
+const DomNode* find_first(const std::vector<DomNode*>& roots,
+                          const std::function<bool(const DomNode*)>& pred) {
+    for (const DomNode* root : roots) {
+        if (const DomNode* found = dfs_find(root, pred)) return found;
+    }
+    return nullptr;
+}
+
+// M2-6 element host object. Minimal public surface: read-only tagName + id only.
+class ElementHost : public HostObject {
+public:
+    explicit ElementHost(const DomNode* node) : node_(node) {}
+
+    std::string global_name() const override { return std::string(); }  // never global
+    std::vector<std::string> property_names() const override {
+        return {"tagName", "id"};
+    }
+    std::vector<std::string> method_names() const override { return {}; }
+
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate, v8::Local<v8::Context>,
+                                      const std::string& name) override {
+        if (name == "tagName") return v8_string(isolate, ascii_upper(node_->tag));
+        if (name == "id") return v8_string(isolate, node_->id);
+        return v8::Undefined(isolate);
+    }
+    v8::Local<v8::Value> call_method(
+        v8::Isolate* isolate, v8::Local<v8::Context>, const std::string&,
+        const v8::FunctionCallbackInfo<v8::Value>&) override {
+        return v8::Undefined(isolate);
+    }
+
+private:
+    const DomNode* node_;  // owned by the DocumentHost that created this element
+};
+
+// M2-6 document host object. Owns the parsed tree + the element wrappers it hands
+// out (both live for this page generation), so a load()/dispose() that tears down
+// the context invalidates everything together.
+class DocumentHost : public HostObject {
+public:
+    DocumentHost(const std::string& html, std::string url)
+        : url_(std::move(url)), title_(extract_title(html)) {
+        parse_html(html, pool_, roots_);
+    }
+
+    std::string global_name() const override { return "document"; }
+    std::vector<std::string> property_names() const override {
+        return {"URL", "title", "readyState", "documentElement", "body"};
+    }
+    std::vector<std::string> method_names() const override {
+        return {"getElementById", "querySelector"};
+    }
+
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate,
+                                      v8::Local<v8::Context> context,
+                                      const std::string& name) override {
+        if (name == "URL") return v8_string(isolate, url_);
+        if (name == "title") return v8_string(isolate, title_);
+        if (name == "readyState") return v8_string(isolate, "complete");
+        if (name == "documentElement") {
+            return element_or_null(isolate, context, find_tag("html"));
+        }
+        if (name == "body") {
+            return element_or_null(isolate, context, find_tag("body"));
+        }
+        return v8::Undefined(isolate);
+    }
+
+    v8::Local<v8::Value> call_method(
+        v8::Isolate* isolate, v8::Local<v8::Context> context,
+        const std::string& name,
+        const v8::FunctionCallbackInfo<v8::Value>& args) override {
+        std::string arg;
+        if (args.Length() > 0) {
+            v8::String::Utf8Value utf8(isolate, args[0]);
+            if (*utf8 != nullptr) {
+                arg.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+            }
+        }
+        if (name == "getElementById") {
+            return element_or_null(isolate, context, find_id(arg));
+        }
+        if (name == "querySelector") {
+            return element_or_null(isolate, context, query(arg));
+        }
+        return v8::Undefined(isolate);
+    }
+
+private:
+    const DomNode* find_tag(const std::string& tag) const {
+        return find_first(roots_,
+                          [&](const DomNode* n) { return n->tag == tag; });
+    }
+    const DomNode* find_id(const std::string& id) const {
+        if (id.empty()) return nullptr;
+        return find_first(roots_, [&](const DomNode* n) { return n->id == id; });
+    }
+    const DomNode* find_class(const std::string& cls) const {
+        if (cls.empty()) return nullptr;
+        return find_first(roots_, [&](const DomNode* n) {
+            return std::find(n->classes.begin(), n->classes.end(), cls) !=
+                   n->classes.end();
+        });
+    }
+    // M2-6 querySelector subset: exactly one of `#id` / `tagname` / `.class`.
+    const DomNode* query(const std::string& raw) const {
+        std::size_t a = 0;
+        std::size_t b = raw.size();
+        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
+        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
+        const std::string sel = raw.substr(a, b - a);
+        if (sel.empty()) return nullptr;
+        if (sel[0] == '#') return find_id(sel.substr(1));
+        if (sel[0] == '.') return find_class(sel.substr(1));
+        return find_tag(ascii_lower(sel));
+    }
+    v8::Local<v8::Value> element_or_null(v8::Isolate* isolate,
+                                         v8::Local<v8::Context> context,
+                                         const DomNode* node) {
+        if (node == nullptr) return v8::Null(isolate);
+        ElementHost* host = nullptr;
+        const auto it = wrappers_.find(node);
+        if (it != wrappers_.end()) {
+            host = it->second;
+        } else {
+            auto element = std::make_unique<ElementHost>(node);
+            host = element.get();
+            elements_.push_back(std::move(element));
+            wrappers_.emplace(node, host);
+        }
+        return make_host_object(isolate, context, host);
+    }
+
+    std::string url_;
+    std::string title_;
+    std::vector<std::unique_ptr<DomNode>> pool_;
+    std::vector<DomNode*> roots_;
+    std::vector<std::unique_ptr<ElementHost>> elements_;
+    std::unordered_map<const DomNode*, ElementHost*> wrappers_;
+};
+
 // --- M2-4 timers: JS-visible setTimeout/clearTimeout/setInterval/clearInterval.
 // These are bare global functions (not a host object). Each recovers the owning
 // ContextState from the isolate embedder-data slot and delegates to its timer
@@ -366,6 +701,8 @@ void PageState::install_page(const std::string& base_url,
     host_objects_.push_back(std::make_unique<NavigatorHost>());  // M2-3 navigator
     host_objects_.push_back(  // M2-3 location, sourced from this page's base URL
         std::make_unique<LocationHost>(decompose_url(base_url)));
+    host_objects_.push_back(  // M2-6 document, from the loaded html + base URL
+        std::make_unique<DocumentHost>(html, base_url));
 
     // Install the host objects and the browser-like global roots into the
     // context. window / self are aliases of the global object; globalThis is the
