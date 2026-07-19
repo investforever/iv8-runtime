@@ -12,6 +12,37 @@ namespace iv8 {
 
 class ContextState;
 
+// M2-6 read-only document snapshot. Produced only by PageState::document() and
+// bound to Python as _core.Document. Holds a shared_ptr to the owning context
+// PURELY for the M1/M2-5 invalidation check — after load() or dispose() the
+// context is torn down, so every read raises JSContextDisposedError — plus the
+// static snapshot strings for the current page generation. Holds NO V8 handles.
+//
+// `title` and `text()` are produced by MINIMAL string extraction/transform, NOT
+// an HTML/DOM parser and NOT a browser-equivalent textContent (see
+// docs/m2_6_document.md). There is no Node/Element/selector/mutation surface.
+class Document {
+public:
+    Document(std::shared_ptr<ContextState> state, std::string url,
+             std::string html);
+
+    std::string url() const;
+    std::string base_uri() const;
+    std::string title() const;
+    std::string html() const;
+    std::string text() const;
+
+private:
+    // Raises ContextDisposedError once the owning context has been torn down.
+    void ensure_alive() const;
+
+    std::shared_ptr<ContextState> state_;
+    std::string url_;
+    std::string html_;
+    std::string title_;
+    std::string text_;
+};
+
 // M2-1 native page state. A Page is the M2 container that owns one execution
 // context (the M1 ContextState) plus the host objects installed into it. This
 // round keeps it minimal: lifecycle (eval / dispose / disposed) simply delegates
@@ -49,15 +80,20 @@ public:
     // -> JSContextBusyError; after dispose() -> JSContextDisposedError.
     void load(const std::string& html, const std::string& base_url);
 
+    // M2-6: a read-only Document snapshot for the CURRENT page generation. Raises
+    // JSContextDisposedError after dispose(). The returned Document is bound to
+    // the current context, so a later load()/dispose() invalidates it (its reads
+    // then raise JSContextDisposedError) — same rule as retained JSValues.
+    Document document();
+
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the
     // page's host objects + global roots + timers into it. Used by the ctor and
     // by load().
     void install_page(const std::string& base_url, const std::string& html);
 
-    // Minimal internal page root state captured by load() — the seed for a later
-    // document bootstrap. Intentionally NOT exposed (no public document surface
-    // in M2-5). Written on each install; not read yet.
+    // Minimal internal page root state captured on each install/load — the seed
+    // read by document() to build the read-only snapshot. Not exposed directly.
     struct PageBootstrap {
         std::string html;
         std::string base_url;
@@ -69,7 +105,7 @@ private:
     // dereferenced.
     std::shared_ptr<ContextState> state_;
     std::vector<std::unique_ptr<HostObject>> host_objects_;
-    [[maybe_unused]] PageBootstrap bootstrap_;
+    PageBootstrap bootstrap_;
 };
 
 }  // namespace iv8

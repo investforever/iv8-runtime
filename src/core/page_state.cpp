@@ -1,5 +1,7 @@
 #include "iv8/page_state.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <utility>
 
@@ -292,6 +294,53 @@ private:
 // that sets this per page is a LATER phase, deliberately not done here.
 constexpr char kDefaultBaseUrl[] = "https://iv8.invalid/";
 
+// --- M2-6 document snapshot helpers. MINIMAL string extraction/transform only:
+// NOT an HTML/DOM parser, and text() is NOT a browser-equivalent textContent.
+
+std::string ascii_lower(const std::string& s) {
+    std::string out(s);
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return out;
+}
+
+// Inner text of the first `<title>...</title>` (case-insensitive on the exact
+// tags; no attribute support). Empty if absent. Not a parser.
+std::string extract_title(const std::string& html) {
+    static constexpr char kOpen[] = "<title>";
+    static constexpr char kClose[] = "</title>";
+    const std::string lower = ascii_lower(html);
+    const std::size_t start = lower.find(kOpen);
+    if (start == std::string::npos) {
+        return std::string();
+    }
+    const std::size_t inner = start + (sizeof(kOpen) - 1);
+    const std::size_t end = lower.find(kClose, inner);
+    if (end == std::string::npos) {
+        return std::string();
+    }
+    return html.substr(inner, end - inner);
+}
+
+// Naive tag strip: drop every `<...>` span. No entity decoding, no script/style
+// handling, no whitespace normalization. Deterministic, but NOT textContent.
+std::string extract_text(const std::string& html) {
+    std::string out;
+    out.reserve(html.size());
+    bool in_tag = false;
+    for (char c : html) {
+        if (c == '<') {
+            in_tag = true;
+        } else if (c == '>') {
+            in_tag = false;
+        } else if (!in_tag) {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
 // --- M2-4 timers: JS-visible setTimeout/clearTimeout/setInterval/clearInterval.
 // These are bare global functions (not a host object). Each recovers the owning
 // ContextState from the isolate embedder-data slot and delegates to its timer
@@ -425,5 +474,55 @@ void PageState::dispose() { state_->dispose(); }
 void PageState::run_timers() { state_->run_timers(); }
 
 void PageState::run_jobs() { state_->run_jobs(); }
+
+Document PageState::document() {
+    if (state_->disposed()) {
+        throw ContextDisposedError();
+    }
+    // Snapshot bound to the current context generation. A later load()/dispose()
+    // tears that context down, so this Document then fails per the M1 rules.
+    return Document(state_, bootstrap_.base_url, bootstrap_.html);
+}
+
+// --- Document (read-only snapshot) ------------------------------------------
+
+Document::Document(std::shared_ptr<ContextState> state, std::string url,
+                   std::string html)
+    : state_(std::move(state)),
+      url_(std::move(url)),
+      html_(std::move(html)),
+      title_(extract_title(html_)),
+      text_(extract_text(html_)) {}
+
+void Document::ensure_alive() const {
+    if (!state_ || state_->disposed()) {
+        throw ContextDisposedError();
+    }
+}
+
+std::string Document::url() const {
+    ensure_alive();
+    return url_;
+}
+
+std::string Document::base_uri() const {
+    ensure_alive();
+    return url_;  // M2-6 has no <base> element; base_uri == url.
+}
+
+std::string Document::title() const {
+    ensure_alive();
+    return title_;
+}
+
+std::string Document::html() const {
+    ensure_alive();
+    return html_;
+}
+
+std::string Document::text() const {
+    ensure_alive();
+    return text_;
+}
 
 }  // namespace iv8

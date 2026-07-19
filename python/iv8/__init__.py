@@ -28,8 +28,13 @@ pump — ``Page.run_timers()`` (fire scheduled timer callbacks once) and
 only the pump executes pending work. M2-5 (Page / Load Model) adds
 ``Page.load(html=..., base_url=...)``, which refreshes the page state from static
 input: the JS context is rebuilt and ``location`` re-derives from ``base_url``
-(``html`` is captured as internal document-bootstrap state, no public document
-surface). It is not a real navigation/loader.
+(``html`` is captured as internal document-bootstrap state). It is not a real
+navigation/loader. M2-6 (Document) adds a minimal read-only ``page.document``
+snapshot (``url`` / ``base_uri`` / ``title`` / ``html()`` / ``text()``) derived
+from the loaded HTML + base URL; ``title`` / ``text()`` are minimal string
+extraction (not a DOM parser / not browser ``textContent``). No selector,
+Node/Element, mutation, DOM, history, or network surface. ``page.document`` is
+the only new public API in M2-6 and returns objects reachable only via a page.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
