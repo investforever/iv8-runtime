@@ -350,12 +350,23 @@ void install_global_function(v8::Isolate* isolate, v8::Local<v8::Context> contex
 
 }  // namespace
 
-PageState::PageState() : state_(std::make_shared<ContextState>()) {
-    host_objects_.push_back(std::make_unique<HostProbe>());   // M2-1 framework probe
+PageState::PageState() {
+    // Initial page state uses the fixed default base URL and empty document seed.
+    install_page(kDefaultBaseUrl, std::string());
+}
+
+void PageState::install_page(const std::string& base_url,
+                             const std::string& html) {
+    bootstrap_ = PageBootstrap{html, base_url};
+
+    state_ = std::make_shared<ContextState>();
+    host_objects_.clear();
+    host_objects_.push_back(std::make_unique<HostProbe>());    // M2-1 probe
     host_objects_.push_back(std::make_unique<ConsoleHost>());  // M2-2 console
     host_objects_.push_back(std::make_unique<NavigatorHost>());  // M2-3 navigator
-    host_objects_.push_back(  // M2-3 location, from the fixed page base URL
-        std::make_unique<LocationHost>(decompose_url(kDefaultBaseUrl)));
+    host_objects_.push_back(  // M2-3 location, sourced from this page's base URL
+        std::make_unique<LocationHost>(decompose_url(base_url)));
+
     // Install the host objects and the browser-like global roots into the
     // context. window / self are aliases of the global object; globalThis is the
     // intrinsic global — so window === globalThis and self === window.
@@ -379,6 +390,19 @@ PageState::PageState() : state_(std::make_shared<ContextState>()) {
             install_global_function(isolate, context, global, "clearInterval",
                                     &clear_timer_callback);
         });
+}
+
+void PageState::load(const std::string& html, const std::string& base_url) {
+    // dispose() is terminal for a Page: a load after it uses the M1 error path.
+    if (state_->disposed()) {
+        throw ContextDisposedError();
+    }
+    // Replace the current page state. dispose() enforces the busy rule
+    // (JSContextBusyError if an operation is active) and tears down the current
+    // context, which invalidates any retained page-bound JSValues per the M1
+    // rules. Then install a fresh context whose location reflects base_url.
+    state_->dispose();
+    install_page(base_url, html);
 }
 
 PageState::~PageState() {

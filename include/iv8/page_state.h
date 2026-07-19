@@ -41,13 +41,35 @@ public:
     void run_timers();
     void run_jobs();
 
+    // M2-5 page load: refresh the page state from static input. Tears down the
+    // current context (invalidating any old page-bound JSValues per the M1 rules)
+    // and installs a fresh one whose `location` derives from `base_url`; `html`
+    // is captured as internal document-bootstrap state (no public document
+    // surface). NOT a real navigation/loader. On the current context being busy
+    // -> JSContextBusyError; after dispose() -> JSContextDisposedError.
+    void load(const std::string& html, const std::string& base_url);
+
 private:
+    // Build a fresh ContextState for `base_url` (location source) and install the
+    // page's host objects + global roots + timers into it. Used by the ctor and
+    // by load().
+    void install_page(const std::string& base_url, const std::string& html);
+
+    // Minimal internal page root state captured by load() — the seed for a later
+    // document bootstrap. Intentionally NOT exposed (no public document surface
+    // in M2-5). Written on each install; not read yet.
+    struct PageBootstrap {
+        std::string html;
+        std::string base_url;
+    };
+
     // Declared before host_objects_ so that, in ~PageState, the context is torn
     // down (in the body) before the host objects are destroyed (members run in
     // reverse declaration order) — no dangling internal-field pointer is ever
     // dereferenced.
     std::shared_ptr<ContextState> state_;
     std::vector<std::unique_ptr<HostObject>> host_objects_;
+    [[maybe_unused]] PageBootstrap bootstrap_;
 };
 
 }  // namespace iv8

@@ -1,18 +1,21 @@
-"""Public ``Page`` — the M2-1 minimal container that owns one execution context
-and the native host objects installed into it.
+"""Public ``Page`` — the M2 container that owns one execution context plus the
+native host objects and browser-like globals installed into it.
 
-This is intentionally minimal (M2-1 covers only the Host Object Framework): it
-exposes ``eval`` (delegated to its owned context), disposal, ``disposed``, and
-context-manager use. It is **not** a full page object — there is no ``load``,
-navigation, timers, ``console``, or browser globals (those are later M2 phases).
-
-A page installs the M2-1 framework probe host object as the JS global
-``hostProbe`` purely to validate the framework; that probe is infrastructure,
-not a stable API surface.
+A page provides ``eval`` (delegated to its owned context), disposal, ``disposed``,
+and context-manager use. Inside its JS context it installs: the global roots
+``window`` / ``globalThis`` / ``self`` (all the same object); a minimal
+``console`` (``log`` / ``info`` / ``warn`` / ``error`` → Python ``logging``);
+static read-only ``navigator`` and ``location``; and JS-visible timers
+(``setTimeout`` / ``clearTimeout`` / ``setInterval`` / ``clearInterval``) that run
+only via the manual pumps ``run_timers()`` / ``run_jobs()``. ``load()`` refreshes
+this page state from static HTML + base URL (``location`` then reflects the base
+URL). It is still NOT a full page object — no public document/DOM, navigation,
+history, or network. (The M2-1 framework probe ``hostProbe`` is also installed as
+internal infrastructure, not a stable API.)
 
 The public API shape is identical in both build modes: when V8 is linked,
-``Page()`` creates a context and installs its host objects; in a V8-free
-skeleton build ``Page()`` raises ``RuntimeError`` (mirroring ``JSContext``).
+``Page()`` creates a context and installs the above; in a V8-free skeleton build
+``Page()`` raises ``RuntimeError`` (mirroring ``JSContext``).
 """
 
 from . import _core
@@ -77,6 +80,25 @@ class Page:
         ``JSContextDisposedError`` after ``dispose()``.
         """
         self._native.run_jobs()
+
+    def load(self, html: str, base_url: str) -> None:
+        """Refresh the page state from static HTML and a base URL.
+
+        Replaces the current page state: the JS context is rebuilt (globals reset)
+        and ``location`` is re-derived from ``base_url``. ``html`` is captured as
+        internal document-bootstrap state (no public document surface yet). This
+        is NOT a real navigation/loader — no network, subresources, or history.
+
+        Repeated calls replace the prior page state; a retained ``JSValue`` from a
+        previous load follows the usual disposed/invalidation rules. Raises
+        ``JSContextBusyError`` if an operation is active, and
+        ``JSContextDisposedError`` after ``dispose()``.
+        """
+        if not isinstance(html, str):
+            raise TypeError("html must be a str")
+        if not isinstance(base_url, str):
+            raise TypeError("base_url must be a str")
+        self._native.load(html, base_url)
 
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""

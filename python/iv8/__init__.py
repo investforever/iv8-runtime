@@ -25,8 +25,11 @@ URL; no navigation). M2-4 (Timers / Jobs) adds JS-visible ``setTimeout`` /
 ``clearTimeout`` / ``setInterval`` / ``clearInterval`` plus a Python-side manual
 pump — ``Page.run_timers()`` (fire scheduled timer callbacks once) and
 ``Page.run_jobs()`` (drain the microtask queue). Nothing runs in the background;
-only the pump executes pending work. The BOM objects are JS globals only; the two
-pump methods are the only new Python API in M2-4.
+only the pump executes pending work. M2-5 (Page / Load Model) adds
+``Page.load(html=..., base_url=...)``, which refreshes the page state from static
+input: the JS context is rebuilt and ``location`` re-derives from ``base_url``
+(``html`` is captured as internal document-bootstrap state, no public document
+surface). It is not a real navigation/loader.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
