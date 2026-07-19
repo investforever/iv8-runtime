@@ -382,6 +382,20 @@ bool is_void_element(const std::string& tag) {
     return false;
 }
 
+// Split a class attribute value into tokens on ASCII whitespace.
+std::vector<std::string> split_class_tokens(const std::string& value) {
+    std::vector<std::string> tokens;
+    std::size_t j = 0;
+    const std::size_t m = value.size();
+    while (j < m) {
+        while (j < m && std::isspace(static_cast<unsigned char>(value[j]))) j++;
+        const std::size_t ts = j;
+        while (j < m && !std::isspace(static_cast<unsigned char>(value[j]))) j++;
+        if (j > ts) tokens.push_back(value.substr(ts, j - ts));
+    }
+    return tokens;
+}
+
 // Capture id + class from the raw attribute text inside a start tag. Minimal
 // attribute tokenizer (quoted / bare values); ONLY id and class are retained —
 // every other attribute is ignored (M2-7 getAttribute answers only these two).
@@ -421,14 +435,7 @@ void parse_attributes(const std::string& attrs, DomNode& node) {
         } else if (name == "class") {
             node.class_name = value;
             node.has_class = true;
-            std::size_t j = 0;
-            const std::size_t m = value.size();
-            while (j < m) {
-                while (j < m && std::isspace(static_cast<unsigned char>(value[j]))) j++;
-                const std::size_t ts = j;
-                while (j < m && !std::isspace(static_cast<unsigned char>(value[j]))) j++;
-                if (j > ts) node.classes.push_back(value.substr(ts, j - ts));
-            }
+            node.classes = split_class_tokens(value);
         }
     }
 }
@@ -519,20 +526,20 @@ void parse_html(const std::string& html,
     }
 }
 
-const DomNode* dfs_find(const DomNode* node,
-                        const std::function<bool(const DomNode*)>& pred) {
+DomNode* dfs_find(DomNode* node, const std::function<bool(const DomNode*)>& pred) {
     if (pred(node)) return node;
-    for (const DomNode* child : node->children) {
-        if (const DomNode* found = dfs_find(child, pred)) return found;
+    for (DomNode* child : node->children) {
+        if (DomNode* found = dfs_find(child, pred)) return found;
     }
     return nullptr;
 }
 
-// First node (document order / pre-order) matching `pred`, or nullptr.
-const DomNode* find_first(const std::vector<DomNode*>& roots,
-                          const std::function<bool(const DomNode*)>& pred) {
-    for (const DomNode* root : roots) {
-        if (const DomNode* found = dfs_find(root, pred)) return found;
+// First node (document order / pre-order) matching `pred`, or nullptr. Returns a
+// mutable node so M2-8 mutations (setAttribute / textContent) can update it.
+DomNode* find_first(const std::vector<DomNode*>& roots,
+                    const std::function<bool(const DomNode*)>& pred) {
+    for (DomNode* root : roots) {
+        if (DomNode* found = dfs_find(root, pred)) return found;
     }
     return nullptr;
 }
@@ -546,7 +553,7 @@ class DocumentHost;  // ElementHost holds a back-pointer to its document
 // owning DocumentHost. Methods are defined out-of-line (below DocumentHost).
 class ElementHost : public HostObject {
 public:
-    ElementHost(const DomNode* node, DocumentHost* document)
+    ElementHost(DomNode* node, DocumentHost* document)
         : node_(node), document_(document) {}
 
     std::string global_name() const override { return std::string(); }  // never global
@@ -555,19 +562,26 @@ public:
                 "textContent", "parentNode", "childNodes", "children"};
     }
     std::vector<std::string> method_names() const override {
-        return {"getAttribute", "hasAttribute"};
+        return {"getAttribute", "hasAttribute", "setAttribute"};  // M2-8 setAttribute
+    }
+    // M2-8: textContent is writable (element.textContent = ...).
+    std::vector<std::string> writable_property_names() const override {
+        return {"textContent"};
     }
 
     v8::Local<v8::Value> get_property(v8::Isolate* isolate,
                                       v8::Local<v8::Context> context,
                                       const std::string& name) override;
+    void set_property(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                      const std::string& name,
+                      v8::Local<v8::Value> value) override;
     v8::Local<v8::Value> call_method(
         v8::Isolate* isolate, v8::Local<v8::Context> context,
         const std::string& name,
         const v8::FunctionCallbackInfo<v8::Value>& args) override;
 
 private:
-    const DomNode* node_;      // owned by document_ (lives for the page generation)
+    DomNode* node_;            // owned by document_ (lives for the page generation)
     DocumentHost* document_;
 };
 
@@ -628,7 +642,7 @@ public:
     // ElementHost can wrap parents/children. Wrappers are cached + owned here.
     v8::Local<v8::Value> wrap_element(v8::Isolate* isolate,
                                       v8::Local<v8::Context> context,
-                                      const DomNode* node) {
+                                      DomNode* node) {
         if (node == nullptr) return v8::Null(isolate);
         ElementHost* host = nullptr;
         const auto it = wrappers_.find(node);
@@ -644,15 +658,15 @@ public:
     }
 
 private:
-    const DomNode* find_tag(const std::string& tag) const {
+    DomNode* find_tag(const std::string& tag) const {
         return find_first(roots_,
                           [&](const DomNode* n) { return n->tag == tag; });
     }
-    const DomNode* find_id(const std::string& id) const {
+    DomNode* find_id(const std::string& id) const {
         if (id.empty()) return nullptr;
         return find_first(roots_, [&](const DomNode* n) { return n->id == id; });
     }
-    const DomNode* find_class(const std::string& cls) const {
+    DomNode* find_class(const std::string& cls) const {
         if (cls.empty()) return nullptr;
         return find_first(roots_, [&](const DomNode* n) {
             return std::find(n->classes.begin(), n->classes.end(), cls) !=
@@ -660,7 +674,7 @@ private:
         });
     }
     // querySelector subset: exactly one of `#id` / `tagname` / `.class`.
-    const DomNode* query(const std::string& raw) const {
+    DomNode* query(const std::string& raw) const {
         std::size_t a = 0;
         std::size_t b = raw.size();
         while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
@@ -677,7 +691,7 @@ private:
     std::vector<std::unique_ptr<DomNode>> pool_;
     std::vector<DomNode*> roots_;
     std::vector<std::unique_ptr<ElementHost>> elements_;
-    std::unordered_map<const DomNode*, ElementHost*> wrappers_;
+    std::unordered_map<DomNode*, ElementHost*> wrappers_;
 };
 
 v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
@@ -710,29 +724,67 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     return v8::Undefined(isolate);
 }
 
+// M2-8: textContent write. In the minimal (text-node-free) tree, setting
+// textContent replaces all children with the given text — i.e. detach children
+// and store the text. Live queries (getElementById/querySelector/children) then
+// no longer see the removed nodes; no separate index needs updating.
+void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                               const std::string& name, v8::Local<v8::Value> value) {
+    if (name != "textContent") {
+        return;  // only textContent is writable
+    }
+    std::string text;
+    v8::Local<v8::String> str;
+    if (value->ToString(context).ToLocal(&str)) {
+        v8::String::Utf8Value utf8(isolate, str);
+        if (*utf8 != nullptr) {
+            text.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+        }
+    }
+    for (DomNode* child : node_->children) {
+        child->parent = nullptr;
+    }
+    node_->children.clear();
+    node_->text_content = text;
+}
+
 v8::Local<v8::Value> ElementHost::call_method(
     v8::Isolate* isolate, v8::Local<v8::Context>, const std::string& name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-    std::string attr;
-    if (args.Length() > 0) {
-        v8::String::Utf8Value utf8(isolate, args[0]);
-        if (*utf8 != nullptr) {
-            attr.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+    const auto arg_string = [&](int index) -> std::string {
+        if (index >= args.Length()) return std::string();
+        v8::String::Utf8Value utf8(isolate, args[index]);
+        return *utf8 != nullptr
+                   ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
+                   : std::string();
+    };
+    // getAttribute / hasAttribute answer only id + class (the retained attrs).
+    if (name == "getAttribute" || name == "hasAttribute") {
+        const std::string key = ascii_lower(arg_string(0));
+        const bool is_id = (key == "id");
+        const bool is_class = (key == "class");
+        if (name == "hasAttribute") {
+            return v8::Boolean::New(
+                isolate, (is_id && node_->has_id) || (is_class && node_->has_class));
         }
-    }
-    const std::string key = ascii_lower(attr);
-    // M2-7 retains only id + class, so only those are answerable.
-    if (name == "getAttribute") {
-        if (key == "id" && node_->has_id) return v8_string(isolate, node_->id);
-        if (key == "class" && node_->has_class) {
-            return v8_string(isolate, node_->class_name);
-        }
+        if (is_id && node_->has_id) return v8_string(isolate, node_->id);
+        if (is_class && node_->has_class) return v8_string(isolate, node_->class_name);
         return v8::Null(isolate);
     }
-    if (name == "hasAttribute") {
-        const bool present = (key == "id" && node_->has_id) ||
-                             (key == "class" && node_->has_class);
-        return v8::Boolean::New(isolate, present);
+    // M2-8 setAttribute: only id + class are retained; other names are ignored
+    // (not a full attribute system). Mutations are visible to live queries.
+    if (name == "setAttribute") {
+        const std::string key = ascii_lower(arg_string(0));
+        const std::string val = arg_string(1);
+        if (key == "id") {
+            node_->id = val;
+            node_->has_id = true;
+        } else if (key == "class") {
+            node_->class_name = val;
+            node_->has_class = true;
+            node_->classes = split_class_tokens(val);
+        }
+        return v8::Undefined(isolate);
     }
     return v8::Undefined(isolate);
 }

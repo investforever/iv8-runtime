@@ -37,9 +37,12 @@ objects (``tagName`` / ``id`` only). M2-7 (Minimal Node / Element) extends those
 JS ``element`` objects with a read-only node surface — ``nodeType`` /
 ``nodeName`` / ``textContent`` / ``parentNode`` / ``childNodes`` / ``children`` /
 ``className`` / ``getAttribute`` / ``hasAttribute`` (id + class only) — still no
-mutation and no ``querySelectorAll``. These are all JS globals reachable via
-``Page.eval``; M2-6/M2-7 add NO new Python API and no Python document/element
-type.
+mutation and no ``querySelectorAll``. M2-8 (Targeted DOM Mutation) adds two
+JS-side writes on elements — ``element.textContent = ...`` and
+``element.setAttribute("id"|"class", value)`` — acting on the minimal internal
+tree (no append/remove, no full attribute system). These are all JS globals
+reachable via ``Page.eval``; M2-6…M2-8 add NO new Python API and no Python
+document/element type.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

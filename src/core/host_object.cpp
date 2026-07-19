@@ -1,5 +1,6 @@
 #include "iv8/host_object.h"
 
+#include <algorithm>
 #include <string>
 
 namespace iv8 {
@@ -44,6 +45,20 @@ void property_getter(v8::Local<v8::Name> property,
     info.GetReturnValue().Set(host->get_property(isolate, context, key));
 }
 
+// Generic setter for writable properties (M2-8): dispatch to set_property().
+void property_setter(v8::Local<v8::Name> property, v8::Local<v8::Value> value,
+                     const v8::PropertyCallbackInfo<void>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    HostObject* host = backing_of(info.Holder());
+    if (host == nullptr) {
+        return;
+    }
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::String::Utf8Value name(isolate, property);
+    const std::string key(*name != nullptr ? *name : "");
+    host->set_property(isolate, context, key, value);
+}
+
 // One generic method trampoline: the method name is carried as the function's
 // Data, dispatched to the backing object's call_method().
 void method_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -66,15 +81,25 @@ v8::Local<v8::Object> make_host_object(v8::Isolate* isolate,
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
     tmpl->SetInternalFieldCount(1);  // slot 0 = HostObject* (aligned pointer)
 
-    // Host-object data properties are getter-computed and read-only: ReadOnly
-    // makes a JS write a no-op (sloppy) / TypeError (strict) instead of shadowing
-    // the accessor with a writable value; DontDelete keeps them present. Without
-    // ReadOnly the default (None) attribute is writable.
-    const v8::PropertyAttribute read_only =
-        static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete);
+    // Data properties are getter-computed. Read-only ones use ReadOnly|DontDelete
+    // (a JS write is a no-op in sloppy mode / TypeError in strict). Writable ones
+    // (host->writable_property_names(), M2-8) additionally get a setter and drop
+    // ReadOnly so assignment dispatches to set_property.
+    const std::vector<std::string> writable = host->writable_property_names();
+    const auto is_writable = [&writable](const std::string& name) {
+        return std::find(writable.begin(), writable.end(), name) != writable.end();
+    };
     for (const std::string& property : host->property_names()) {
-        tmpl->SetNativeDataProperty(v8str(isolate, property), &property_getter,
-                                    nullptr, v8::Local<v8::Value>(), read_only);
+        if (is_writable(property)) {
+            tmpl->SetNativeDataProperty(
+                v8str(isolate, property), &property_getter, &property_setter,
+                v8::Local<v8::Value>(), v8::DontDelete);
+        } else {
+            tmpl->SetNativeDataProperty(
+                v8str(isolate, property), &property_getter, nullptr,
+                v8::Local<v8::Value>(),
+                static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete));
+        }
     }
     for (const std::string& method : host->method_names()) {
         v8::Local<v8::String> mname = v8str(isolate, method);

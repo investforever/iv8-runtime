@@ -41,6 +41,16 @@ public:
     virtual v8::Local<v8::Value> get_property(v8::Isolate* isolate,
                                               v8::Local<v8::Context> context,
                                               const std::string& name) = 0;
+
+    // Writable data properties (default: none -> all properties are read-only).
+    // For each name returned here, make_host_object installs a setter that calls
+    // set_property; all other properties stay read-only (ReadOnly|DontDelete).
+    virtual std::vector<std::string> writable_property_names() const { return {}; }
+    // Handle a write to a writable property. Runs inside the isolate/context
+    // scopes; default is a no-op. (M2-8: element.textContent.)
+    virtual void set_property(v8::Isolate*, v8::Local<v8::Context>,
+                              const std::string& /*name*/,
+                              v8::Local<v8::Value> /*value*/) {}
     // Handle a call to method `name`. Runs inside the isolate/context scopes.
     virtual v8::Local<v8::Value> call_method(
         v8::Isolate* isolate, v8::Local<v8::Context> context,
