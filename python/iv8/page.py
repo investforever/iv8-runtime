@@ -67,10 +67,26 @@ class Page:
             )
         # Native page holder: creates the context and installs host objects.
         self._native = _core.Page()
+        # M3-2 page lifecycle: a fresh page has its (blank) default generation
+        # installed, so it starts "complete". load() drives loading -> complete.
+        self._ready_state = "complete"
 
     @property
     def disposed(self) -> bool:
         return self._native.disposed
+
+    @property
+    def ready_state(self) -> str:
+        """M3-2 page lifecycle state — ``"loading"`` or ``"complete"``.
+
+        Read-only. ``"complete"`` on a fresh page and after a successful
+        ``load()``; ``"loading"`` while a ``load()`` is in progress and after a
+        ``load()`` that did not complete (a script raised, or the context was
+        disposed/busy) until a later successful ``load()``. This is the Python
+        page lifecycle; it is distinct from the JS ``document.readyState`` (which
+        stays ``"complete"``). Not affected by ``dispose()`` — use ``disposed``.
+        """
+        return self._ready_state
 
     def eval(self, source: str, *, to_py: bool = False, name: str = "<eval>") -> object:
         """Compile and run JavaScript in this page's context.
@@ -136,14 +152,21 @@ class Page:
             raise TypeError("html must be a str")
         if not isinstance(base_url, str):
             raise TypeError("base_url must be a str")
-        # Validate scripts before touching page state (bad input must not reload).
+        # Validate scripts before touching page state or the lifecycle (bad input
+        # must neither reload the page nor enter "loading").
         normalized = _normalize_scripts(scripts)
+        # M3-2: enter "loading" for the whole install + scripts phase. It only
+        # returns to "complete" once everything below succeeds — so a failure
+        # (script JSError, or a disposed/busy context) leaves ready_state
+        # "loading" until a later successful load.
+        self._ready_state = "loading"
         self._native.load(html, base_url)
         # Execute host-provided scripts in order, in the freshly installed
         # generation. eval reuses the existing JSError path (resource_name = name)
         # and shares globals across scripts; a failure propagates (no rollback).
         for name, code in normalized:
             self._native.eval(code, False, name)
+        self._ready_state = "complete"
 
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""

@@ -46,7 +46,12 @@ document/element type. M3-1 (External Script Loading) extends ``Page.load`` with
 an optional ``scripts`` list — mappings of ``name`` + ``code`` executed
 synchronously in order in the loaded generation (each ``name`` is its resource
 name; a failure raises the existing ``JSError``). No network, no ``<script
-src>``; the only public change is the ``Page.load(scripts=...)`` parameter.
+src>``; the only public change is the ``Page.load(scripts=...)`` parameter. M3-2
+(Page Lifecycle) adds the read-only ``Page.ready_state`` (``"loading"`` /
+``"complete"``): ``"complete"`` on a fresh page and after a successful ``load``,
+``"loading"`` while loading and after a load that did not complete. It is a
+Python-side lifecycle distinct from the JS ``document.readyState`` (which stays
+``"complete"``), and is the only new public surface in M3-2.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
