@@ -141,11 +141,165 @@ private:
     }
 };
 
+v8::Local<v8::Value> v8_string(v8::Isolate* isolate, const std::string& s) {
+    return v8::String::NewFromUtf8(isolate, s.c_str(), v8::NewStringType::kNormal,
+                                   static_cast<int>(s.size()))
+        .ToLocalChecked();
+}
+
+// M2-3 minimal navigator (read-only). All values are fixed constants — static,
+// deterministic, and IDENTICAL across Linux/Windows (never OS-derived). No
+// feature detection, no fingerprinting surface beyond these four.
+class NavigatorHost : public HostObject {
+public:
+    std::string global_name() const override { return "navigator"; }
+
+    std::vector<std::string> property_names() const override {
+        return {"userAgent", "platform", "language", "webdriver"};
+    }
+
+    std::vector<std::string> method_names() const override { return {}; }
+
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate, v8::Local<v8::Context>,
+                                      const std::string& name) override {
+        if (name == "userAgent") {
+            return v8_string(isolate, "Mozilla/5.0 (compatible; iv8)");
+        }
+        if (name == "platform") {
+            return v8_string(isolate, "iv8");
+        }
+        if (name == "language") {
+            return v8_string(isolate, "en-US");
+        }
+        if (name == "webdriver") {
+            return v8::Boolean::New(isolate, false);  // frozen direction
+        }
+        return v8::Undefined(isolate);
+    }
+
+    v8::Local<v8::Value> call_method(
+        v8::Isolate* isolate, v8::Local<v8::Context>, const std::string&,
+        const v8::FunctionCallbackInfo<v8::Value>&) override {
+        return v8::Undefined(isolate);  // navigator exposes no methods
+    }
+};
+
+// The static components of a decomposed URL (WHATWG-style names). Only the
+// pieces M2-3 location exposes.
+struct UrlParts {
+    std::string href;
+    std::string origin;
+    std::string protocol;
+    std::string host;
+    std::string hostname;
+    std::string pathname;
+    std::string search;
+    std::string hash;
+};
+
+// Minimal, deterministic decomposition of an absolute `scheme://host[:port]/
+// path?query#hash` URL. NOT a full WHATWG URL parser (no userinfo, default-port
+// elision, or percent-decoding) — just enough for the fixed page base URL.
+UrlParts decompose_url(const std::string& url) {
+    UrlParts parts;
+    parts.href = url;
+
+    std::string rest = url;
+    const auto scheme_end = rest.find(':');
+    if (scheme_end != std::string::npos) {
+        parts.protocol = rest.substr(0, scheme_end + 1);  // includes ':'
+        rest = rest.substr(scheme_end + 1);
+    }
+    if (rest.rfind("//", 0) == 0) {  // has an authority
+        rest = rest.substr(2);
+        const auto auth_end = rest.find_first_of("/?#");
+        const std::string authority =
+            (auth_end == std::string::npos) ? rest : rest.substr(0, auth_end);
+        rest = (auth_end == std::string::npos) ? "" : rest.substr(auth_end);
+        parts.host = authority;  // host + optional port
+        const auto port = authority.find(':');
+        parts.hostname =
+            (port == std::string::npos) ? authority : authority.substr(0, port);
+        parts.origin = parts.protocol + "//" + parts.host;
+    }
+    const auto hash_pos = rest.find('#');
+    if (hash_pos != std::string::npos) {
+        parts.hash = rest.substr(hash_pos);  // includes '#'
+        rest = rest.substr(0, hash_pos);
+    }
+    const auto query_pos = rest.find('?');
+    if (query_pos != std::string::npos) {
+        parts.search = rest.substr(query_pos);  // includes '?'
+        rest = rest.substr(0, query_pos);
+    }
+    parts.pathname = rest;
+    return parts;
+}
+
+// M2-3 minimal location (read-only). Values are the static decomposition of the
+// page's base URL. Read-only: exposed as getter-only accessors, so a JS-side
+// write is a no-op (sloppy) / TypeError (strict) and NEVER triggers navigation
+// — there is no assign/replace/reload/href-write navigation in M2-3.
+class LocationHost : public HostObject {
+public:
+    explicit LocationHost(UrlParts parts) : parts_(std::move(parts)) {}
+
+    std::string global_name() const override { return "location"; }
+
+    std::vector<std::string> property_names() const override {
+        return {"href",     "origin",   "protocol", "host",
+                "hostname", "pathname", "search",   "hash"};
+    }
+
+    std::vector<std::string> method_names() const override { return {"toString"}; }
+
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate, v8::Local<v8::Context>,
+                                      const std::string& name) override {
+        const std::string* value = component(name);
+        if (value != nullptr) {
+            return v8_string(isolate, *value);
+        }
+        return v8::Undefined(isolate);
+    }
+
+    v8::Local<v8::Value> call_method(
+        v8::Isolate* isolate, v8::Local<v8::Context>, const std::string& name,
+        const v8::FunctionCallbackInfo<v8::Value>&) override {
+        if (name == "toString") {
+            return v8_string(isolate, parts_.href);
+        }
+        return v8::Undefined(isolate);
+    }
+
+private:
+    const std::string* component(const std::string& name) const {
+        if (name == "href") return &parts_.href;
+        if (name == "origin") return &parts_.origin;
+        if (name == "protocol") return &parts_.protocol;
+        if (name == "host") return &parts_.host;
+        if (name == "hostname") return &parts_.hostname;
+        if (name == "pathname") return &parts_.pathname;
+        if (name == "search") return &parts_.search;
+        if (name == "hash") return &parts_.hash;
+        return nullptr;
+    }
+
+    UrlParts parts_;
+};
+
+// Fixed internal default base URL for M2-3. The RFC 2606 `.invalid` TLD makes it
+// clearly a non-routable placeholder (not a real navigation). A real page.load()
+// that sets this per page is a LATER phase, deliberately not done here.
+constexpr char kDefaultBaseUrl[] = "https://iv8.invalid/";
+
 }  // namespace
 
 PageState::PageState() : state_(std::make_shared<ContextState>()) {
     host_objects_.push_back(std::make_unique<HostProbe>());   // M2-1 framework probe
     host_objects_.push_back(std::make_unique<ConsoleHost>());  // M2-2 console
+    host_objects_.push_back(std::make_unique<NavigatorHost>());  // M2-3 navigator
+    host_objects_.push_back(  // M2-3 location, from the fixed page base URL
+        std::make_unique<LocationHost>(decompose_url(kDefaultBaseUrl)));
     // Install the host objects and the browser-like global roots into the
     // context. window / self are aliases of the global object; globalThis is the
     // intrinsic global — so window === globalThis and self === window.

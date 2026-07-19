@@ -17,7 +17,11 @@ reusable host-object infrastructure. M2-2 (Global / Window / Console) exposes,
 inside a ``Page``'s JS context, the browser-like global roots ``window`` /
 ``globalThis`` / ``self`` (all the same object) and a minimal ``console``
 (``log`` / ``info`` / ``warn`` / ``error``) that routes to Python ``logging``
-(logger ``iv8.console``). These are JS globals only — they add NO new Python API.
+(logger ``iv8.console``). M2-3 (Navigator / Location) adds static, read-only
+``navigator`` (``userAgent`` / ``platform`` / ``language`` / ``webdriver``) and
+``location`` (``href`` / ``origin`` / ``protocol`` / ``host`` / ``hostname`` /
+``pathname`` / ``search`` / ``hash`` / ``toString()``, from a fixed default base
+URL; no navigation). These are all JS globals only — they add NO new Python API.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
