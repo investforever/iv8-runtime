@@ -57,6 +57,27 @@ class Page:
             raise TypeError("to_py must be a bool")
         return self._native.eval(source, to_py, name)
 
+    def run_timers(self) -> None:
+        """Manually pump timers: fire every currently-scheduled ``setTimeout`` /
+        ``setInterval`` callback once, ordered by ``(delay, registration order)``.
+
+        Timers never run in the background — only this call executes them. Delay
+        determines firing order within a pump, not real-time waiting. One-shot
+        (``setTimeout``) timers are removed after firing; interval
+        (``setInterval``) timers fire again on the next call. Timers scheduled by
+        a callback during the pump fire on the next call. An exception raised by a
+        callback is swallowed; the page/context stays usable. Raises
+        ``JSContextDisposedError`` after ``dispose()``.
+        """
+        self._native.run_timers()
+
+    def run_jobs(self) -> None:
+        """Manually pump jobs: drain the pending microtask queue (e.g. resolved
+        Promise reactions). Microtasks never run automatically. Raises
+        ``JSContextDisposedError`` after ``dispose()``.
+        """
+        self._native.run_jobs()
+
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""
         self._native.dispose()

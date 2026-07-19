@@ -35,6 +35,12 @@ public:
                           const std::string& name);
     void dispose();
 
+    // M2-4 manual pumps (delegate to the owned context). run_timers fires
+    // currently-scheduled timer callbacks once; run_jobs drains the microtask
+    // queue. Both reuse the M1 operation guard (disposed -> JSContextDisposedError).
+    void run_timers();
+    void run_jobs();
+
 private:
     // Declared before host_objects_ so that, in ~PageState, the context is torn
     // down (in the body) before the host objects are destroyed (members run in

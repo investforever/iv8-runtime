@@ -17,6 +17,11 @@
 
 namespace iv8 {
 
+// Isolate embedder-data slot holding the owning ContextState* so host callbacks
+// (e.g. setTimeout) can reach it via isolate->GetData(). Each ContextState owns
+// its own isolate, so this slot is private to that context.
+inline constexpr std::uint32_t kIsolateStateSlot = 0;
+
 // Structured lifecycle errors, translated by the binding layer into the public
 // Python exceptions iv8.JSContextDisposedError / JSContextBusyError.
 class ContextDisposedError : public std::runtime_error {
@@ -62,6 +67,23 @@ public:
     void with_scope(
         const std::function<void(v8::Isolate*, v8::Local<v8::Context>)>& fn);
 
+    // --- M2-4 timers / jobs ---------------------------------------------------
+    // Register a timer callback and return its id. Called from the setTimeout /
+    // setInterval host functions WHILE the operation guard is already held (they
+    // run during eval), so these take no guard themselves.
+    std::int64_t register_timer(v8::Local<v8::Function> callback,
+                                std::int32_t delay, bool repeating);
+    // Cancel a timer by id (clearTimeout / clearInterval); also guard-free.
+    void clear_timer(std::int64_t id);
+    // Manual pump: fire every currently-scheduled timer once, ordered by
+    // (delay, registration seq). One-shots are removed; intervals remain for the
+    // next pump; timers scheduled during the pump fire on the NEXT pump. Runs
+    // under the operation guard (serial/busy rules) with the GIL released around
+    // each callback; a throwing callback is swallowed so the context stays usable.
+    void run_timers();
+    // Manual pump: drain the pending microtask (job) queue.
+    void run_jobs();
+
     // Explicit dispose: rejects if an operation is active (ContextBusyError),
     // otherwise runs the ordered teardown.
     void dispose();
@@ -101,6 +123,19 @@ private:
     std::mutex table_mutex_;
     std::unordered_map<std::uint64_t, v8::Global<v8::Value>> values_;
     std::uint64_t next_id_ = 1;
+
+    // Timer registry (M2-4). Only mutated under the operation guard (during eval
+    // for register/clear, and inside run_timers), and reset in teardown() before
+    // isolate disposal — so no separate mutex is needed.
+    struct TimerEntry {
+        v8::Global<v8::Function> callback;
+        std::int32_t delay = 0;
+        bool repeating = false;
+        std::uint64_t seq = 0;
+    };
+    std::unordered_map<std::int64_t, TimerEntry> timers_;
+    std::int64_t next_timer_id_ = 1;
+    std::uint64_t next_timer_seq_ = 0;
 };
 
 // Thin per-JSContext owner: holds the shared state and delegates. This is the

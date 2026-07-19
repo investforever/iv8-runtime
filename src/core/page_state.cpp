@@ -292,6 +292,62 @@ private:
 // that sets this per page is a LATER phase, deliberately not done here.
 constexpr char kDefaultBaseUrl[] = "https://iv8.invalid/";
 
+// --- M2-4 timers: JS-visible setTimeout/clearTimeout/setInterval/clearInterval.
+// These are bare global functions (not a host object). Each recovers the owning
+// ContextState from the isolate embedder-data slot and delegates to its timer
+// registry. They run during eval, i.e. under the context operation guard.
+
+ContextState* state_from_isolate(v8::Isolate* isolate) {
+    return static_cast<ContextState*>(isolate->GetData(kIsolateStateSlot));
+}
+
+void register_timer_callback(const v8::FunctionCallbackInfo<v8::Value>& info,
+                             bool repeating) {
+    v8::Isolate* isolate = info.GetIsolate();
+    ContextState* state = state_from_isolate(isolate);
+    if (state == nullptr || info.Length() < 1 || !info[0]->IsFunction()) {
+        return;  // invalid call: no timer registered, returns undefined
+    }
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::Function> callback = info[0].As<v8::Function>();
+    std::int32_t delay = 0;
+    if (info.Length() > 1) {
+        delay = info[1]->Int32Value(context).FromMaybe(0);
+    }
+    const std::int64_t id = state->register_timer(callback, delay, repeating);
+    info.GetReturnValue().Set(static_cast<double>(id));
+}
+
+void set_timeout_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    register_timer_callback(info, /*repeating=*/false);
+}
+
+void set_interval_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    register_timer_callback(info, /*repeating=*/true);
+}
+
+// Shared by clearTimeout and clearInterval (single id space, like browsers).
+void clear_timer_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    ContextState* state = state_from_isolate(isolate);
+    if (state == nullptr || info.Length() < 1) {
+        return;
+    }
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::int64_t id =
+        static_cast<std::int64_t>(info[0]->IntegerValue(context).FromMaybe(0));
+    state->clear_timer(id);
+}
+
+void install_global_function(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                             v8::Local<v8::Object> global, const std::string& name,
+                             v8::FunctionCallback callback) {
+    v8::Local<v8::Function> fn =
+        v8::FunctionTemplate::New(isolate, callback)->GetFunction(context)
+            .ToLocalChecked();
+    (void)global->Set(context, v8_string(isolate, name), fn);
+}
+
 }  // namespace
 
 PageState::PageState() : state_(std::make_shared<ContextState>()) {
@@ -313,6 +369,15 @@ PageState::PageState() : state_(std::make_shared<ContextState>()) {
                 context, v8::String::NewFromUtf8Literal(isolate, "window"), global);
             (void)global->Set(
                 context, v8::String::NewFromUtf8Literal(isolate, "self"), global);
+            // M2-4 JS-visible timers (manual-pump; see PageState::run_timers).
+            install_global_function(isolate, context, global, "setTimeout",
+                                    &set_timeout_callback);
+            install_global_function(isolate, context, global, "clearTimeout",
+                                    &clear_timer_callback);
+            install_global_function(isolate, context, global, "setInterval",
+                                    &set_interval_callback);
+            install_global_function(isolate, context, global, "clearInterval",
+                                    &clear_timer_callback);
         });
 }
 
@@ -332,5 +397,9 @@ py::object PageState::eval(const std::string& source, bool to_py,
 }
 
 void PageState::dispose() { state_->dispose(); }
+
+void PageState::run_timers() { state_->run_timers(); }
+
+void PageState::run_jobs() { state_->run_jobs(); }
 
 }  // namespace iv8

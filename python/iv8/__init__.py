@@ -21,7 +21,12 @@ inside a ``Page``'s JS context, the browser-like global roots ``window`` /
 ``navigator`` (``userAgent`` / ``platform`` / ``language`` / ``webdriver``) and
 ``location`` (``href`` / ``origin`` / ``protocol`` / ``host`` / ``hostname`` /
 ``pathname`` / ``search`` / ``hash`` / ``toString()``, from a fixed default base
-URL; no navigation). These are all JS globals only — they add NO new Python API.
+URL; no navigation). M2-4 (Timers / Jobs) adds JS-visible ``setTimeout`` /
+``clearTimeout`` / ``setInterval`` / ``clearInterval`` plus a Python-side manual
+pump — ``Page.run_timers()`` (fire scheduled timer callbacks once) and
+``Page.run_jobs()`` (drain the microtask queue). Nothing runs in the background;
+only the pump executes pending work. The BOM objects are JS globals only; the two
+pump methods are the only new Python API in M2-4.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

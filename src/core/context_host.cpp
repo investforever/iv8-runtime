@@ -1,7 +1,10 @@
 #include "iv8/context_host.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "iv8/engine_runtime.h"
 #include "iv8/js_exception.h"
@@ -27,6 +30,11 @@ ContextState::ContextState() {
     isolate_host_ = std::make_unique<IsolateHost>();
 
     v8::Isolate* isolate = isolate_host_->isolate();
+    // Let host callbacks (setTimeout etc.) recover this ContextState, and make
+    // microtasks (jobs) run only on an explicit pump (run_jobs), never
+    // automatically — M2-4 is manual-pump only.
+    isolate->SetData(kIsolateStateSlot, this);
+    isolate->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
     v8::Isolate::Scope isolate_scope(isolate);
     v8::HandleScope handle_scope(isolate);
     v8::Local<v8::Context> local = v8::Context::New(isolate);
@@ -56,6 +64,11 @@ void ContextState::teardown() noexcept {
         }
         values_.clear();
     }
+    // 1b. reset any scheduled timer callbacks (isolate still alive)
+    for (auto& entry : timers_) {
+        entry.second.callback.Reset();
+    }
+    timers_.clear();
     // 2. reset the persistent context, 3. dispose isolate + 4. release allocator
     context_.Reset();
     isolate_host_.reset();
@@ -76,6 +89,87 @@ void ContextState::with_scope(
     v8::Local<v8::Context> context = context_.Get(isolate);
     v8::Context::Scope context_scope(context);
     fn(isolate, context);
+}
+
+std::int64_t ContextState::register_timer(v8::Local<v8::Function> callback,
+                                          std::int32_t delay, bool repeating) {
+    const std::int64_t id = next_timer_id_++;
+    TimerEntry entry;
+    entry.callback.Reset(isolate_host_->isolate(), callback);
+    entry.delay = delay < 0 ? 0 : delay;
+    entry.repeating = repeating;
+    entry.seq = next_timer_seq_++;
+    timers_.emplace(id, std::move(entry));
+    return id;
+}
+
+void ContextState::clear_timer(std::int64_t id) {
+    auto it = timers_.find(id);
+    if (it != timers_.end()) {
+        it->second.callback.Reset();
+        timers_.erase(it);
+    }
+}
+
+void ContextState::run_timers() {
+    OperationScope guard(*this);
+    v8::Isolate* isolate = isolate_host_->isolate();
+    v8::Locker locker(isolate);
+    v8::Isolate::Scope isolate_scope(isolate);
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Context> context = context_.Get(isolate);
+    v8::Context::Scope context_scope(context);
+
+    // Snapshot the currently-scheduled timers, ordered by (delay, seq). Timers
+    // scheduled by a callback during this pump are NOT in the snapshot, so they
+    // fire on the next pump (bounded, loop-safe).
+    std::vector<std::int64_t> order;
+    order.reserve(timers_.size());
+    for (const auto& kv : timers_) {
+        order.push_back(kv.first);
+    }
+    std::sort(order.begin(), order.end(),
+              [this](std::int64_t a, std::int64_t b) {
+                  const TimerEntry& ta = timers_.at(a);
+                  const TimerEntry& tb = timers_.at(b);
+                  if (ta.delay != tb.delay) {
+                      return ta.delay < tb.delay;
+                  }
+                  return ta.seq < tb.seq;
+              });
+
+    for (std::int64_t id : order) {
+        auto it = timers_.find(id);
+        if (it == timers_.end()) {
+            continue;  // cancelled by an earlier callback in this pump
+        }
+        v8::Local<v8::Function> callback = it->second.callback.Get(isolate);
+        if (!it->second.repeating) {
+            it->second.callback.Reset();
+            timers_.erase(it);  // one-shot: gone before it runs
+        }
+        v8::TryCatch try_catch(isolate);
+        {
+            py::gil_scoped_release release_gil;
+            v8::Local<v8::Value> recv = context->Global();
+            (void)callback->Call(context, recv, 0, nullptr);
+        }
+        if (try_catch.HasCaught()) {
+            try_catch.Reset();  // swallow: page/context stays usable
+        }
+    }
+}
+
+void ContextState::run_jobs() {
+    OperationScope guard(*this);
+    v8::Isolate* isolate = isolate_host_->isolate();
+    v8::Locker locker(isolate);
+    v8::Isolate::Scope isolate_scope(isolate);
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Context> context = context_.Get(isolate);
+    v8::Context::Scope context_scope(context);
+    py::gil_scoped_release release_gil;
+    isolate->PerformMicrotaskCheckpoint();
 }
 
 std::uint64_t ContextState::retain_value(v8::Local<v8::Value> value) {
