@@ -102,15 +102,15 @@ def test_query_selector_subset():
 # --- element minimal surface (tagName + id only) --------------------------------
 
 @on_only
-def test_element_minimal_surface():
+def test_element_has_no_mutation_or_query_surface():
+    # M2-7 adds the read-only node surface (tested in test_node_element.py). Here
+    # we only guard that NO mutation / query / M2-8 surface leaked onto elements.
     with iv8.Page() as page:
         _loaded(page)
         assert page.eval("typeof document.body.tagName") == "string"
-        assert page.eval("typeof document.body.id") == "string"
-        # No Node/Element layer, no mutation, no query surface on elements.
-        for absent in ("textContent", "innerHTML", "children", "childNodes",
-                       "parentNode", "className", "getAttribute", "setAttribute",
-                       "append", "remove", "querySelector"):
+        for absent in ("innerHTML", "outerHTML", "querySelector",
+                       "querySelectorAll", "setAttribute", "removeAttribute",
+                       "append", "remove", "insertBefore", "style"):
             assert page.eval(f"document.body.{absent} === undefined") is True
 
 

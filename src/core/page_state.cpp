@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -335,12 +336,37 @@ std::string extract_title(const std::string& html) {
     return html.substr(inner, close - inner);
 }
 
-// A minimal HTML element node. Only what M2-6 queries need.
+// Naive tag strip (drop every <...> span). Used for the M2-7 textContent
+// aggregate. No entity decoding / script-style handling / whitespace norm.
+std::string strip_tags(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    bool in_tag = false;
+    for (char c : s) {
+        if (c == '<') {
+            in_tag = true;
+        } else if (c == '>') {
+            in_tag = false;
+        } else if (!in_tag) {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+// A minimal HTML element node. Only what M2-6/M2-7 queries need — no full DOM.
 struct DomNode {
     std::string tag;                   // lowercased tag name
     std::string id;                    // id attribute value, or ""
-    std::vector<std::string> classes;  // class tokens
+    bool has_id = false;               // whether an id attribute was present
+    std::string class_name;            // raw class attribute value, or ""
+    bool has_class = false;            // whether a class attribute was present
+    std::vector<std::string> classes;  // class tokens (for .class matching)
+    std::string text_content;          // M2-7 aggregate text (precomputed)
+    DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
+    std::size_t content_start = 0;     // [start,end) of inner HTML in the source
+    std::size_t content_end = 0;
 };
 
 bool is_void_element(const std::string& tag) {
@@ -357,9 +383,9 @@ bool is_void_element(const std::string& tag) {
 }
 
 // Capture id + class from the raw attribute text inside a start tag. Minimal
-// attribute tokenizer (quoted / bare values); ignores every other attribute.
-void parse_attributes(const std::string& attrs, std::string& id_out,
-                      std::vector<std::string>& class_out) {
+// attribute tokenizer (quoted / bare values); ONLY id and class are retained —
+// every other attribute is ignored (M2-7 getAttribute answers only these two).
+void parse_attributes(const std::string& attrs, DomNode& node) {
     const std::size_t n = attrs.size();
     std::size_t i = 0;
     while (i < n) {
@@ -390,15 +416,18 @@ void parse_attributes(const std::string& attrs, std::string& id_out,
             }
         }
         if (name == "id") {
-            id_out = value;
+            node.id = value;
+            node.has_id = true;
         } else if (name == "class") {
+            node.class_name = value;
+            node.has_class = true;
             std::size_t j = 0;
             const std::size_t m = value.size();
             while (j < m) {
                 while (j < m && std::isspace(static_cast<unsigned char>(value[j]))) j++;
                 const std::size_t ts = j;
                 while (j < m && !std::isspace(static_cast<unsigned char>(value[j]))) j++;
-                if (j > ts) class_out.push_back(value.substr(ts, j - ts));
+                if (j > ts) node.classes.push_back(value.substr(ts, j - ts));
             }
         }
     }
@@ -420,6 +449,7 @@ void parse_html(const std::string& html,
         if (i + 1 >= n) break;
         const char c1 = html[i + 1];
         if (c1 == '/') {  // end tag
+            const std::size_t end_tag_start = i;  // '<' of the closing tag
             std::size_t j = i + 2;
             const std::size_t ns = j;
             while (j < n && html[j] != '>' &&
@@ -431,6 +461,7 @@ void parse_html(const std::string& html,
             i = j;
             for (std::size_t k = stack.size(); k-- > 0;) {
                 if (stack[k]->tag == name) {
+                    stack[k]->content_end = end_tag_start;  // inner HTML range end
                     stack.resize(k);
                     break;
                 }
@@ -462,16 +493,28 @@ void parse_html(const std::string& html,
 
         auto node = std::make_unique<DomNode>();
         node->tag = tag;
-        parse_attributes(body, node->id, node->classes);
+        node->content_start = i;   // just past '>'
+        node->content_end = i;     // default empty; set when the end tag closes it
+        parse_attributes(body, *node);
         DomNode* raw = node.get();
         pool.push_back(std::move(node));
         if (stack.empty()) {
             roots.push_back(raw);
         } else {
+            raw->parent = stack.back();
             stack.back()->children.push_back(raw);
         }
         if (!self_closing && !is_void_element(tag)) {
             stack.push_back(raw);
+        }
+    }
+
+    // Precompute textContent for every node: inner-HTML range with tags stripped
+    // (a naive aggregate; see docs). Void/self-closing/unclosed -> empty.
+    for (const std::unique_ptr<DomNode>& node : pool) {
+        if (node->content_end > node->content_start) {
+            node->text_content = strip_tags(html.substr(
+                node->content_start, node->content_end - node->content_start));
         }
     }
 }
@@ -494,36 +537,43 @@ const DomNode* find_first(const std::vector<DomNode*>& roots,
     return nullptr;
 }
 
-// M2-6 element host object. Minimal public surface: read-only tagName + id only.
+class DocumentHost;  // ElementHost holds a back-pointer to its document
+
+// M2-6/M2-7 element host object. Read-only, minimal node/element surface:
+// tagName / nodeName / nodeType / id / className / textContent + parentNode /
+// childNodes / children + getAttribute / hasAttribute. No mutation, no full
+// Node/Element layer. parent/child accessors wrap related nodes back through the
+// owning DocumentHost. Methods are defined out-of-line (below DocumentHost).
 class ElementHost : public HostObject {
 public:
-    explicit ElementHost(const DomNode* node) : node_(node) {}
+    ElementHost(const DomNode* node, DocumentHost* document)
+        : node_(node), document_(document) {}
 
     std::string global_name() const override { return std::string(); }  // never global
     std::vector<std::string> property_names() const override {
-        return {"tagName", "id"};
+        return {"tagName",     "nodeName",   "nodeType", "id",     "className",
+                "textContent", "parentNode", "childNodes", "children"};
     }
-    std::vector<std::string> method_names() const override { return {}; }
+    std::vector<std::string> method_names() const override {
+        return {"getAttribute", "hasAttribute"};
+    }
 
-    v8::Local<v8::Value> get_property(v8::Isolate* isolate, v8::Local<v8::Context>,
-                                      const std::string& name) override {
-        if (name == "tagName") return v8_string(isolate, ascii_upper(node_->tag));
-        if (name == "id") return v8_string(isolate, node_->id);
-        return v8::Undefined(isolate);
-    }
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate,
+                                      v8::Local<v8::Context> context,
+                                      const std::string& name) override;
     v8::Local<v8::Value> call_method(
-        v8::Isolate* isolate, v8::Local<v8::Context>, const std::string&,
-        const v8::FunctionCallbackInfo<v8::Value>&) override {
-        return v8::Undefined(isolate);
-    }
+        v8::Isolate* isolate, v8::Local<v8::Context> context,
+        const std::string& name,
+        const v8::FunctionCallbackInfo<v8::Value>& args) override;
 
 private:
-    const DomNode* node_;  // owned by the DocumentHost that created this element
+    const DomNode* node_;      // owned by document_ (lives for the page generation)
+    DocumentHost* document_;
 };
 
-// M2-6 document host object. Owns the parsed tree + the element wrappers it hands
-// out (both live for this page generation), so a load()/dispose() that tears down
-// the context invalidates everything together.
+// M2-6 document host object (M2-7 hands out node-capable elements). Owns the
+// parsed tree + element wrappers for this page generation, so a load()/dispose()
+// that tears down the context invalidates everything together.
 class DocumentHost : public HostObject {
 public:
     DocumentHost(const std::string& html, std::string url)
@@ -546,10 +596,10 @@ public:
         if (name == "title") return v8_string(isolate, title_);
         if (name == "readyState") return v8_string(isolate, "complete");
         if (name == "documentElement") {
-            return element_or_null(isolate, context, find_tag("html"));
+            return wrap_element(isolate, context, find_tag("html"));
         }
         if (name == "body") {
-            return element_or_null(isolate, context, find_tag("body"));
+            return wrap_element(isolate, context, find_tag("body"));
         }
         return v8::Undefined(isolate);
     }
@@ -566,12 +616,31 @@ public:
             }
         }
         if (name == "getElementById") {
-            return element_or_null(isolate, context, find_id(arg));
+            return wrap_element(isolate, context, find_id(arg));
         }
         if (name == "querySelector") {
-            return element_or_null(isolate, context, query(arg));
+            return wrap_element(isolate, context, query(arg));
         }
         return v8::Undefined(isolate);
+    }
+
+    // Wrap a node as a JS element host object (JS null for nullptr). Public so
+    // ElementHost can wrap parents/children. Wrappers are cached + owned here.
+    v8::Local<v8::Value> wrap_element(v8::Isolate* isolate,
+                                      v8::Local<v8::Context> context,
+                                      const DomNode* node) {
+        if (node == nullptr) return v8::Null(isolate);
+        ElementHost* host = nullptr;
+        const auto it = wrappers_.find(node);
+        if (it != wrappers_.end()) {
+            host = it->second;
+        } else {
+            auto element = std::make_unique<ElementHost>(node, this);
+            host = element.get();
+            elements_.push_back(std::move(element));
+            wrappers_.emplace(node, host);
+        }
+        return make_host_object(isolate, context, host);
     }
 
 private:
@@ -590,7 +659,7 @@ private:
                    n->classes.end();
         });
     }
-    // M2-6 querySelector subset: exactly one of `#id` / `tagname` / `.class`.
+    // querySelector subset: exactly one of `#id` / `tagname` / `.class`.
     const DomNode* query(const std::string& raw) const {
         std::size_t a = 0;
         std::size_t b = raw.size();
@@ -602,22 +671,6 @@ private:
         if (sel[0] == '.') return find_class(sel.substr(1));
         return find_tag(ascii_lower(sel));
     }
-    v8::Local<v8::Value> element_or_null(v8::Isolate* isolate,
-                                         v8::Local<v8::Context> context,
-                                         const DomNode* node) {
-        if (node == nullptr) return v8::Null(isolate);
-        ElementHost* host = nullptr;
-        const auto it = wrappers_.find(node);
-        if (it != wrappers_.end()) {
-            host = it->second;
-        } else {
-            auto element = std::make_unique<ElementHost>(node);
-            host = element.get();
-            elements_.push_back(std::move(element));
-            wrappers_.emplace(node, host);
-        }
-        return make_host_object(isolate, context, host);
-    }
 
     std::string url_;
     std::string title_;
@@ -626,6 +679,63 @@ private:
     std::vector<std::unique_ptr<ElementHost>> elements_;
     std::unordered_map<const DomNode*, ElementHost*> wrappers_;
 };
+
+v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
+                                               v8::Local<v8::Context> context,
+                                               const std::string& name) {
+    if (name == "tagName" || name == "nodeName") {
+        return v8_string(isolate, ascii_upper(node_->tag));
+    }
+    if (name == "nodeType") {
+        return v8::Integer::New(isolate, 1);  // ELEMENT_NODE
+    }
+    if (name == "id") return v8_string(isolate, node_->id);
+    if (name == "className") return v8_string(isolate, node_->class_name);
+    if (name == "textContent") return v8_string(isolate, node_->text_content);
+    if (name == "parentNode") {
+        return document_->wrap_element(isolate, context, node_->parent);
+    }
+    // childNodes == children here: the minimal tree has no text nodes, so both
+    // return this element's child elements in document order.
+    if (name == "childNodes" || name == "children") {
+        v8::Local<v8::Array> array =
+            v8::Array::New(isolate, static_cast<int>(node_->children.size()));
+        for (std::size_t k = 0; k < node_->children.size(); ++k) {
+            (void)array->Set(
+                context, static_cast<std::uint32_t>(k),
+                document_->wrap_element(isolate, context, node_->children[k]));
+        }
+        return array;
+    }
+    return v8::Undefined(isolate);
+}
+
+v8::Local<v8::Value> ElementHost::call_method(
+    v8::Isolate* isolate, v8::Local<v8::Context>, const std::string& name,
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+    std::string attr;
+    if (args.Length() > 0) {
+        v8::String::Utf8Value utf8(isolate, args[0]);
+        if (*utf8 != nullptr) {
+            attr.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+        }
+    }
+    const std::string key = ascii_lower(attr);
+    // M2-7 retains only id + class, so only those are answerable.
+    if (name == "getAttribute") {
+        if (key == "id" && node_->has_id) return v8_string(isolate, node_->id);
+        if (key == "class" && node_->has_class) {
+            return v8_string(isolate, node_->class_name);
+        }
+        return v8::Null(isolate);
+    }
+    if (name == "hasAttribute") {
+        const bool present = (key == "id" && node_->has_id) ||
+                             (key == "class" && node_->has_class);
+        return v8::Boolean::New(isolate, present);
+    }
+    return v8::Undefined(isolate);
+}
 
 // --- M2-4 timers: JS-visible setTimeout/clearTimeout/setInterval/clearInterval.
 // These are bare global functions (not a host object). Each recovers the owning

@@ -33,8 +33,13 @@ navigation/loader. M2-6 (Minimal Document) exposes, inside a page's JS context, 
 read-only ``document`` global (``URL`` / ``title`` / ``readyState`` /
 ``documentElement`` / ``body`` / ``getElementById`` / ``querySelector`` — the
 last supporting only ``#id`` / ``tagname`` / ``.class``) plus minimal ``element``
-objects (``tagName`` / ``id`` only). These are JS globals reachable via
-``Page.eval``; M2-6 adds NO new Python API and no Python document/element type.
+objects (``tagName`` / ``id`` only). M2-7 (Minimal Node / Element) extends those
+JS ``element`` objects with a read-only node surface — ``nodeType`` /
+``nodeName`` / ``textContent`` / ``parentNode`` / ``childNodes`` / ``children`` /
+``className`` / ``getAttribute`` / ``hasAttribute`` (id + class only) — still no
+mutation and no ``querySelectorAll``. These are all JS globals reachable via
+``Page.eval``; M2-6/M2-7 add NO new Python API and no Python document/element
+type.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
