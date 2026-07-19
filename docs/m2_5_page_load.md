@@ -26,6 +26,12 @@ M2-6 is not started.
 
 ## Repeated load / replacement / invalidation
 
+> **`load()` invalidates every page-bound `JSValue` previously derived from this
+> `Page`.** After a `load()`, any `JSValue` obtained from an earlier `eval(...,
+> to_py=False)` on this page reports `context_alive == False`, and any read of it
+> (`type_name`, `to_py()`) raises `JSContextDisposedError`. This is the same
+> invalidation as `dispose()` — the old context is torn down, not migrated.
+
 - Calling `load()` again on the same `Page` **replaces** the prior page-scoped
   state: the previous context is torn down and a new one installed. Globals from
   the previous load are gone (fresh context); `location` reflects the newest
