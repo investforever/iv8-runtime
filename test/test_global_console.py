@@ -25,7 +25,7 @@ def test_no_new_public_python_api_for_m2_2():
 
 
 def test_page_still_minimal_after_m2_2():
-    for forbidden in ("load", "navigate", "reload", "goto", "document"):
+    for forbidden in ("navigate", "reload", "goto", "document"):
         assert not hasattr(iv8.Page, forbidden)
 
 

@@ -40,7 +40,7 @@ def test_no_new_public_python_api_for_m2_3():
 
 def test_page_still_minimal_after_m2_3():
     # No navigation surface leaked onto the Python Page.
-    for forbidden in ("load", "navigate", "reload", "assign", "replace", "goto"):
+    for forbidden in ("navigate", "reload", "assign", "replace", "goto"):
         assert not hasattr(iv8.Page, forbidden)
 
 

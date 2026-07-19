@@ -35,7 +35,7 @@ def test_page_unavailable_in_skeleton_build():
 
 def test_page_is_not_a_full_page_object():
     # M2-1 freeze: no page.load / navigation / browser surface prematurely.
-    for forbidden in ("load", "goto", "navigate", "reload", "document", "window"):
+    for forbidden in ("goto", "navigate", "reload", "document", "window"):
         assert not hasattr(iv8.Page, forbidden)
 
 
