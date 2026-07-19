@@ -15,10 +15,12 @@ namespace iv8 {
 // instance via an internal field, and installs it as a global property.
 //
 // IMPORTANT: the getter/method callbacks run DURING JS execution (inside
-// JSContext eval), i.e. under the owning context's operation guard and WITHOUT
-// the Python GIL. Implementations must therefore touch only V8 — never Python
-// objects. Instances are owned by PageState and must outlive the context they
-// are installed into (their internal-field pointer is read on every access).
+// JSContext eval), i.e. under the owning context's operation guard and with the
+// Python GIL RELEASED. An implementation that needs Python (e.g. console ->
+// logging) must reacquire the GIL for just that work (pybind11::gil_scoped_
+// acquire) and must never let a Python exception escape back into V8. Instances
+// are owned by PageState and must outlive the context they are installed into
+// (their internal-field pointer is read on every access).
 //
 // This is deliberately minimal: property/method plumbing and lifetime binding
 // only. It is the infrastructure the later M2 phases build real objects on; it

@@ -12,8 +12,12 @@ opaque, context-bound ``JSValue`` (``context_alive`` / ``type_name`` /
 
 M2-1 (Host Object Framework) adds a minimal ``Page`` — a container that owns one
 execution context plus native-backed host objects. It is intentionally NOT a
-full page object (no load/navigation/timers/console/browser globals yet); it
-exists to anchor the reusable host-object infrastructure.
+full page object (no load/navigation/timers/document yet); it anchors the
+reusable host-object infrastructure. M2-2 (Global / Window / Console) exposes,
+inside a ``Page``'s JS context, the browser-like global roots ``window`` /
+``globalThis`` / ``self`` (all the same object) and a minimal ``console``
+(``log`` / ``info`` / ``warn`` / ``error``) that routes to Python ``logging``
+(logger ``iv8.console``). These are JS globals only — they add NO new Python API.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
