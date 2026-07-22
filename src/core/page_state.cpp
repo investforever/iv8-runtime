@@ -640,6 +640,21 @@ void collect_scripts(DomNode* node, std::vector<DomNode*>& out) {
     }
 }
 
+// M4-A-1: append every node in the CURRENT tree matching `pred`, in document
+// (pre-)order, to `out`. Live tree walk (like collect_scripts), used by
+// document.querySelectorAll / getElementsByTagName so mutation-detached subtrees
+// drop out on re-query.
+void collect_matching(DomNode* node,
+                      const std::function<bool(const DomNode*)>& pred,
+                      std::vector<DomNode*>& out) {
+    if (pred(node)) {
+        out.push_back(node);
+    }
+    for (DomNode* child : node->children) {
+        collect_matching(child, pred, out);
+    }
+}
+
 // M3-10: whether a <script> is a minimal *classic* (executable) script, by its
 // raw `type` attribute. Executable iff: no type attribute, type is empty or only
 // ASCII whitespace, or type (trimmed, ASCII-lowercased) is exactly
@@ -952,12 +967,13 @@ public:
 
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
-        return {"URL", "title", "readyState", "documentElement", "body",
-                "currentScript", "scripts"};
+        return {"URL",  "title",           "readyState", "documentElement",
+                "head", "body",            "currentScript", "scripts"};
     }
     std::vector<std::string> method_names() const override {
-        // M2-6 document methods + the M3-3 event-target methods.
-        std::vector<std::string> names = {"getElementById", "querySelector"};
+        // M2-6 document methods + M4-A-1 static queries + the M3-3 event methods.
+        std::vector<std::string> names = {"getElementById", "querySelector",
+                                          "querySelectorAll", "getElementsByTagName"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -998,6 +1014,9 @@ public:
         if (name == "documentElement") {
             return wrap_element(isolate, context, find_tag("html"));
         }
+        if (name == "head") {  // M4-A-1: first <head> in the current tree, or null
+            return wrap_element(isolate, context, find_tag("head"));
+        }
         if (name == "body") {
             return wrap_element(isolate, context, find_tag("body"));
         }
@@ -1025,6 +1044,12 @@ public:
         }
         if (name == "querySelector") {
             return wrap_element(isolate, context, query(arg));
+        }
+        if (name == "querySelectorAll") {  // M4-A-1: all matches, document order
+            return elements_array(isolate, context, query_all(arg));
+        }
+        if (name == "getElementsByTagName") {  // M4-A-1
+            return elements_array(isolate, context, elements_by_tag(arg));
         }
         return v8::Undefined(isolate);
     }
@@ -1075,6 +1100,66 @@ private:
         if (sel[0] == '#') return find_id(sel.substr(1));
         if (sel[0] == '.') return find_class(sel.substr(1));
         return find_tag(ascii_lower(sel));
+    }
+
+    // M4-A-1: collect all current-tree nodes matching `pred`, document order.
+    std::vector<DomNode*> collect(
+        const std::function<bool(const DomNode*)>& pred) const {
+        std::vector<DomNode*> out;
+        for (DomNode* root : roots_) {
+            collect_matching(root, pred, out);
+        }
+        return out;
+    }
+
+    // querySelectorAll: same minimal selector subset as query() (#id / .class /
+    // tagname), but returns ALL matches in document order. An empty / empty-token
+    // selector yields no matches.
+    std::vector<DomNode*> query_all(const std::string& raw) const {
+        std::size_t a = 0;
+        std::size_t b = raw.size();
+        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
+        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
+        const std::string sel = raw.substr(a, b - a);
+        if (sel.empty()) return {};
+        if (sel[0] == '#') {
+            const std::string id = sel.substr(1);
+            if (id.empty()) return {};
+            return collect([&](const DomNode* n) { return n->id == id; });
+        }
+        if (sel[0] == '.') {
+            const std::string cls = sel.substr(1);
+            if (cls.empty()) return {};
+            return collect([&](const DomNode* n) {
+                return std::find(n->classes.begin(), n->classes.end(), cls) !=
+                       n->classes.end();
+            });
+        }
+        const std::string tag = ascii_lower(sel);
+        return collect([&](const DomNode* n) { return n->tag == tag; });
+    }
+
+    // getElementsByTagName: ASCII case-insensitive tag match; "*" = all elements.
+    std::vector<DomNode*> elements_by_tag(const std::string& raw) const {
+        if (raw == "*") {
+            return collect([](const DomNode*) { return true; });
+        }
+        const std::string tag = ascii_lower(raw);
+        return collect([&](const DomNode* n) { return n->tag == tag; });
+    }
+
+    // Build a plain JS Array of element host objects for `nodes` (same wrapping
+    // as document.scripts — no NodeList/HTMLCollection, no identity guarantee).
+    v8::Local<v8::Array> elements_array(v8::Isolate* isolate,
+                                        v8::Local<v8::Context> context,
+                                        const std::vector<DomNode*>& nodes) {
+        v8::Local<v8::Array> array =
+            v8::Array::New(isolate, static_cast<int>(nodes.size()));
+        for (std::size_t k = 0; k < nodes.size(); ++k) {
+            (void)array->Set(context, static_cast<std::uint32_t>(k),
+                             wrap_element(isolate, context, nodes[k]));
+        }
+        return array;
     }
 
     std::string url_;

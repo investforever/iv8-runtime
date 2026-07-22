@@ -122,6 +122,16 @@ keeps its resolved URL and is not counted; host ``scripts=[...]`` keep their
 caller-provided ``name``; a non-executable inline script still occupies a number).
 No new Python API / exception / JSError field; failure semantics and everything
 else are unchanged.
+M4-A-1 (static query collections) adds three JS-side ``document`` members:
+``document.head`` (first ``<head>`` element in the current tree, or ``null``,
+like ``body`` / ``documentElement``), ``document.querySelectorAll(selector)`` and
+``document.getElementsByTagName(tag)``. The two queries return a plain JS
+``Array`` of element host objects, collected from the CURRENT tree in document
+order. ``querySelectorAll`` supports the same minimal selector subset as
+``querySelector`` (``#id`` / ``.class`` / ``tagname``); ``getElementsByTagName``
+is ASCII case-insensitive and accepts ``"*"`` (all elements). No
+``NodeList`` / ``HTMLCollection`` / ``item`` / ``namedItem`` and no collection or
+wrapper identity guarantee. No new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

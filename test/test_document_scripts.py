@@ -169,9 +169,8 @@ def test_no_collection_extras():
     html = "<html><body><script id='s'>0;</script></body></html>"
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        # Plain Array: no HTMLCollection-style item/namedItem, and document has no
-        # querySelectorAll / getElementsByTagName.
+        # Plain Array: no HTMLCollection-style item/namedItem. (document.query
+        # SelectorAll / getElementsByTagName themselves were added in M4-A-1 and
+        # also return plain Arrays; their absence is no longer asserted here.)
         assert page.eval("typeof document.scripts.item") == "undefined"
         assert page.eval("typeof document.scripts.namedItem") == "undefined"
-        assert page.eval("typeof document.querySelectorAll") == "undefined"
-        assert page.eval("typeof document.getElementsByTagName") == "undefined"
