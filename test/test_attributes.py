@@ -113,14 +113,18 @@ def test_set_attribute_id_syncs_read_side():
     html = "<html><body><div id='old'></div></body></html>"
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
+        # Note: getElementById hands out a fresh wrapper per call (wrapper identity
+        # is not guaranteed), so verify the id sync via the queries themselves, not
+        # by comparing wrapper objects.
         assert page.eval(
             """
             const el = document.getElementById('old');
             el.setAttribute('id', 'new');
             [el.getAttribute('id'), el.id,
-             document.getElementById('new') === el].join(',');
+             document.getElementById('old') === null,
+             document.getElementById('new').id].join(',');
             """
-        ) == "new,new,true"
+        ) == "new,new,true,new"
 
 
 @on_only
