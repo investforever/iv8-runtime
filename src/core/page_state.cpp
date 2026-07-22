@@ -364,6 +364,11 @@ struct DomNode {
     std::vector<std::string> classes;  // class tokens (for .class matching)
     std::string src;                   // M3-5 src attribute value (script), or ""
     bool has_src = false;              // whether a src attribute was present
+    // M3-8 raw read-only attribute table: canonical lowercase name -> raw value
+    // (boolean/valueless attrs map to ""). Holds every parsed attribute EXCEPT
+    // id/class, which keep their dedicated fields (getAttribute routes those to
+    // the fields, everything else to this table). Duplicate names: last wins.
+    std::unordered_map<std::string, std::string> attributes;
     std::string text_content;          // M2-7 aggregate text (precomputed)
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
@@ -444,6 +449,9 @@ void parse_attributes(const std::string& attrs, DomNode& node) {
                 value = attrs.substr(vs, i - vs);
             }
         }
+        if (name.empty()) {
+            continue;  // malformed: ignore an empty attribute name
+        }
         if (name == "id") {
             node.id = value;
             node.has_id = true;
@@ -451,9 +459,14 @@ void parse_attributes(const std::string& attrs, DomNode& node) {
             node.class_name = value;
             node.has_class = true;
             node.classes = split_class_tokens(value);
-        } else if (name == "src") {
-            node.src = value;
-            node.has_src = true;
+        } else {
+            if (name == "src") {  // M3-5 keeps a dedicated src for resolution
+                node.src = value;
+                node.has_src = true;
+            }
+            // M3-8: every non-id/class attribute is readable via getAttribute.
+            // operator[] overwrites, so a duplicate name keeps the last value.
+            node.attributes[name] = value;
         }
     }
 }
@@ -1095,18 +1108,32 @@ v8::Local<v8::Value> ElementHost::call_method(
                    ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
                    : std::string();
     };
-    // getAttribute / hasAttribute answer only id + class (the retained attrs).
+    // M3-8: getAttribute / hasAttribute read any attribute parsed from the HTML.
+    // id / class route to their dedicated fields (so they stay consistent with
+    // .id / .className / setAttribute); every other name is looked up in the raw
+    // attribute table. Name match is ASCII case-insensitive. Missing -> null /
+    // false; a valueless/boolean attribute reads "" (and hasAttribute -> true).
     if (name == "getAttribute" || name == "hasAttribute") {
         const std::string key = ascii_lower(arg_string(0));
-        const bool is_id = (key == "id");
-        const bool is_class = (key == "class");
-        if (name == "hasAttribute") {
-            return v8::Boolean::New(
-                isolate, (is_id && node_->has_id) || (is_class && node_->has_class));
+        bool present = false;
+        const std::string* value = nullptr;
+        if (key == "id") {
+            present = node_->has_id;
+            value = &node_->id;
+        } else if (key == "class") {
+            present = node_->has_class;
+            value = &node_->class_name;
+        } else {
+            const auto it = node_->attributes.find(key);
+            if (it != node_->attributes.end()) {
+                present = true;
+                value = &it->second;
+            }
         }
-        if (is_id && node_->has_id) return v8_string(isolate, node_->id);
-        if (is_class && node_->has_class) return v8_string(isolate, node_->class_name);
-        return v8::Null(isolate);
+        if (name == "hasAttribute") {
+            return v8::Boolean::New(isolate, present);
+        }
+        return present ? v8_string(isolate, *value) : v8::Null(isolate);
     }
     // M2-8 setAttribute: only id + class are retained; other names are ignored
     // (not a full attribute system). Mutations are visible to live queries.

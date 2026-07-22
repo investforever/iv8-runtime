@@ -88,6 +88,15 @@ script's element (``tagName === "SCRIPT"``, ``id`` visible), and is ``null``
 otherwise — a fresh page, host ``scripts=[...]``, ``page.eval``, timers, event
 listeners / lifecycle handlers, and after a load returns (including after a
 failed load). JS-side only; no new Python API, no new top-level object.
+M3-8 (read-only markup attributes) extends the existing element
+``getAttribute`` / ``hasAttribute`` from id/class-only to any attribute parsed
+from the HTML markup (case-insensitive name; raw string value; a valueless
+attribute reads ``""``; missing → ``null`` / ``false``; duplicate names last-win),
+so e.g. ``document.currentScript.getAttribute("src")`` returns the raw markup
+``src`` (not the resolved URL). The WRITE side is unchanged: ``setAttribute`` still
+only accepts ``id`` / ``class`` (M2-8), and ``id`` / ``className`` /
+``getAttribute("id"|"class")`` / ``querySelector`` stay consistent. JS-side only;
+no new Python API, no attributes collection / ``dataset`` / attribute reflection.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
