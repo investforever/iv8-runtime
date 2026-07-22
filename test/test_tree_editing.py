@@ -105,28 +105,36 @@ def test_same_parent_reorder():
             "</div></body></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
+        # Each eval is wrapped in an IIFE: globals persist across page.eval calls
+        # in one page, so plain `const root` would redeclare on the 2nd/3rd call.
         assert page.eval(
             """
-            const root = document.getElementById('root');
-            root.appendChild(document.getElementById('x'));   // x -> end: y,z,x
-            root.children.map(e => e.id).join(',');
+            (() => {
+              const root = document.getElementById('root');
+              root.appendChild(document.getElementById('x'));   // x -> end: y,z,x
+              return root.children.map(e => e.id).join(',');
+            })();
             """
         ) == "y,z,x"
         assert page.eval(
             """
-            const root = document.getElementById('root');
-            const y = document.getElementById('y');
-            root.insertBefore(y, document.getElementById('x'));  // y before x: z,y,x
-            root.children.map(e => e.id).join(',');
+            (() => {
+              const root = document.getElementById('root');
+              root.insertBefore(document.getElementById('y'),
+                                document.getElementById('x'));  // y before x: z,y,x
+              return root.children.map(e => e.id).join(',');
+            })();
             """
         ) == "z,y,x"
         # insertBefore(child, child) is a stable no-op returning child.
         assert page.eval(
             """
-            const root = document.getElementById('root');
-            const z = document.getElementById('z');
-            const ret = root.insertBefore(z, z);
-            (ret === z) + ',' + root.children.map(e => e.id).join(',');
+            (() => {
+              const root = document.getElementById('root');
+              const z = document.getElementById('z');
+              const ret = root.insertBefore(z, z);
+              return (ret === z) + ',' + root.children.map(e => e.id).join(',');
+            })();
             """
         ) == "true,z,y,x"
 
@@ -209,24 +217,28 @@ def test_queries_follow_edits():
         page.load(html=html, base_url=BASE)
         assert page.eval(
             """
-            const root = document.getElementById('root');
-            const d = document.createElement('div');
-            d.setAttribute('id', 'made'); d.setAttribute('class', 'c');
-            root.appendChild(d);
-            [document.getElementsByTagName('div').length,        // root + made = 2
-             document.querySelectorAll('.c').length,             // 1
-             document.querySelectorAll('#made').length,          // 1
-             document.getElementById('made') !== null].join(',');
+            (() => {
+              const root = document.getElementById('root');
+              const d = document.createElement('div');
+              d.setAttribute('id', 'made'); d.setAttribute('class', 'c');
+              root.appendChild(d);
+              return [document.getElementsByTagName('div').length,  // root + made = 2
+                      document.querySelectorAll('.c').length,       // 1
+                      document.querySelectorAll('#made').length,    // 1
+                      document.getElementById('made') !== null].join(',');
+            })();
             """
         ) == "2,1,1,true"
         # Remove it -> queries no longer see it.
         assert page.eval(
             """
-            const root = document.getElementById('root');
-            root.removeChild(document.getElementById('made'));
-            [document.getElementsByTagName('div').length,        // just root = 1
-             document.querySelectorAll('.c').length,             // 0
-             document.getElementById('made') === null].join(',');
+            (() => {
+              const root = document.getElementById('root');
+              root.removeChild(document.getElementById('made'));
+              return [document.getElementsByTagName('div').length,  // just root = 1
+                      document.querySelectorAll('.c').length,       // 0
+                      document.getElementById('made') === null].join(',');
+            })();
             """
         ) == "1,0,true"
 
