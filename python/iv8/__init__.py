@@ -97,6 +97,14 @@ so e.g. ``document.currentScript.getAttribute("src")`` returns the raw markup
 only accepts ``id`` / ``class`` (M2-8), and ``id`` / ``className`` /
 ``getAttribute("id"|"class")`` / ``querySelector`` stay consistent. JS-side only;
 no new Python API, no attributes collection / ``dataset`` / attribute reflection.
+M3-9 (document.scripts) adds a read-only JS-side ``document.scripts``: a plain JS
+``Array`` of the element host objects for every ``<script>`` in the CURRENT
+document tree, in document order (inline + external; NOT the host
+``scripts=[...]``). It is recollected from the live tree on each read (so a
+mutation that detaches a script subtree is reflected), reuses the M3-8 element
+surface, and makes no live-collection / identity guarantee. JS-side only; no new
+Python API, no ``HTMLCollection`` / ``NodeList`` / ``querySelectorAll`` /
+``getElementsByTagName``.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

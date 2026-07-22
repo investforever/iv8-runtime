@@ -627,6 +627,19 @@ DomNode* find_first(const std::vector<DomNode*>& roots,
     return nullptr;
 }
 
+// M3-9: append every <script> node reachable in the CURRENT tree, in document
+// (pre-)order, to `out`. Walks the live parent/child tree (not the M3-5 parse-time
+// script records), so a mutation that detached a script subtree (e.g. an M2-8
+// textContent write) is reflected — such scripts are simply no longer reachable.
+void collect_scripts(DomNode* node, std::vector<DomNode*>& out) {
+    if (node->tag == "script") {
+        out.push_back(node);
+    }
+    for (DomNode* child : node->children) {
+        collect_scripts(child, out);
+    }
+}
+
 class DocumentHost;  // ElementHost holds a back-pointer to its document
 
 // --- M3-3 minimal event model ------------------------------------------------
@@ -917,7 +930,7 @@ public:
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
         return {"URL", "title", "readyState", "documentElement", "body",
-                "currentScript"};
+                "currentScript", "scripts"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + the M3-3 event-target methods.
@@ -945,6 +958,19 @@ public:
         if (name == "readyState") return v8_string(isolate, ready_state_);
         if (name == "currentScript") {  // M3-7: element while a HTML script runs, else null
             return wrap_element(isolate, context, current_script_);
+        }
+        if (name == "scripts") {  // M3-9: current tree's <script> elements, document order
+            std::vector<DomNode*> nodes;
+            for (DomNode* root : roots_) {
+                collect_scripts(root, nodes);
+            }
+            v8::Local<v8::Array> array =
+                v8::Array::New(isolate, static_cast<int>(nodes.size()));
+            for (std::size_t k = 0; k < nodes.size(); ++k) {
+                (void)array->Set(context, static_cast<std::uint32_t>(k),
+                                 wrap_element(isolate, context, nodes[k]));
+            }
+            return array;
         }
         if (name == "documentElement") {
             return wrap_element(isolate, context, find_tag("html"));
