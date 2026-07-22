@@ -109,11 +109,11 @@ def test_element_has_no_mutation_or_query_surface():
         _loaded(page)
         assert page.eval("typeof document.body.tagName") == "string"
         # (M2-8/M4-A-4 add setAttribute/removeAttribute; M4-A-3 adds appendChild/
-        # removeChild/insertBefore — these stay out of scope: element-level query,
-        # replaceChild, the append/remove/prepend family, innerHTML/style.)
-        for absent in ("innerHTML", "outerHTML", "querySelector",
-                       "querySelectorAll", "replaceChild",
-                       "append", "remove", "prepend", "style"):
+        # removeChild/insertBefore; M4-A-5 adds element querySelector[All]/
+        # getElementsByTagName — these stay out of scope: replaceChild, the
+        # append/remove/prepend family, matches/closest, innerHTML/style.)
+        for absent in ("innerHTML", "outerHTML", "replaceChild", "matches",
+                       "closest", "append", "remove", "prepend", "style"):
             assert page.eval(f"document.body.{absent} === undefined") is True
 
 

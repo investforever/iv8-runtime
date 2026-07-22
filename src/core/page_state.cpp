@@ -655,6 +655,51 @@ void collect_matching(DomNode* node,
     }
 }
 
+// Minimal selector -> node predicate, shared by document- and element-level
+// querySelector / querySelectorAll. Supports exactly `#id` / `.class` / `tagname`;
+// an empty selector, an empty #/. token, or any complex selector (combinator /
+// attribute / pseudo / comma / `*` / …) yields a predicate matching NOTHING
+// (stable empty / null). A complex selector falls into the tag-name branch and
+// matches no real tag.
+std::function<bool(const DomNode*)> selector_predicate(const std::string& raw) {
+    std::size_t a = 0;
+    std::size_t b = raw.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
+    while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
+    const std::string sel = raw.substr(a, b - a);
+    if (sel.empty()) {
+        return [](const DomNode*) { return false; };
+    }
+    if (sel[0] == '#') {
+        const std::string id = sel.substr(1);
+        if (id.empty()) {
+            return [](const DomNode*) { return false; };
+        }
+        return [id](const DomNode* n) { return n->id == id; };
+    }
+    if (sel[0] == '.') {
+        const std::string cls = sel.substr(1);
+        if (cls.empty()) {
+            return [](const DomNode*) { return false; };
+        }
+        return [cls](const DomNode* n) {
+            return std::find(n->classes.begin(), n->classes.end(), cls) !=
+                   n->classes.end();
+        };
+    }
+    const std::string tag = ascii_lower(sel);
+    return [tag](const DomNode* n) { return n->tag == tag; };
+}
+
+// getElementsByTagName predicate: ASCII case-insensitive tag; "*" = every element.
+std::function<bool(const DomNode*)> tag_predicate(const std::string& raw) {
+    if (raw == "*") {
+        return [](const DomNode*) { return true; };
+    }
+    const std::string tag = ascii_lower(raw);
+    return [tag](const DomNode* n) { return n->tag == tag; };
+}
+
 // M4-A-3: unlink `child` from its current parent's children (if any) and clear
 // its parent pointer. `child`'s own subtree is untouched.
 void detach_from_parent(DomNode* child) {
@@ -937,12 +982,13 @@ public:
                 "textContent", "parentNode", "childNodes", "children"};
     }
     std::vector<std::string> method_names() const override {
-        // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing + M3-3
-        // event methods.
-        std::vector<std::string> names = {"getAttribute",    "hasAttribute",
-                                          "setAttribute",    "removeAttribute",
-                                          "appendChild",     "removeChild",
-                                          "insertBefore"};
+        // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing +
+        // M4-A-5 subtree queries + M3-3 event methods.
+        std::vector<std::string> names = {
+            "getAttribute",     "hasAttribute",    "setAttribute",
+            "removeAttribute",  "appendChild",     "removeChild",
+            "insertBefore",     "querySelector",   "querySelectorAll",
+            "getElementsByTagName"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1123,6 +1169,21 @@ public:
         return make_host_object(isolate, context, host);
     }
 
+    // Build a plain JS Array of element host objects for `nodes` (same wrapping as
+    // document.scripts — no NodeList/HTMLCollection, no identity guarantee). Public
+    // so ElementHost's M4-A-5 subtree queries reuse it.
+    v8::Local<v8::Array> elements_array(v8::Isolate* isolate,
+                                        v8::Local<v8::Context> context,
+                                        const std::vector<DomNode*>& nodes) {
+        v8::Local<v8::Array> array =
+            v8::Array::New(isolate, static_cast<int>(nodes.size()));
+        for (std::size_t k = 0; k < nodes.size(); ++k) {
+            (void)array->Set(context, static_cast<std::uint32_t>(k),
+                             wrap_element(isolate, context, nodes[k]));
+        }
+        return array;
+    }
+
 private:
     DomNode* find_tag(const std::string& tag) const {
         return find_first(roots_,
@@ -1139,17 +1200,10 @@ private:
                    n->classes.end();
         });
     }
-    // querySelector subset: exactly one of `#id` / `tagname` / `.class`.
+    // document.querySelector: first match of the minimal selector subset over the
+    // whole tree (document order), or nullptr. (M4-A-5 shares selector_predicate.)
     DomNode* query(const std::string& raw) const {
-        std::size_t a = 0;
-        std::size_t b = raw.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
-        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
-        const std::string sel = raw.substr(a, b - a);
-        if (sel.empty()) return nullptr;
-        if (sel[0] == '#') return find_id(sel.substr(1));
-        if (sel[0] == '.') return find_class(sel.substr(1));
-        return find_tag(ascii_lower(sel));
+        return find_first(roots_, selector_predicate(raw));
     }
 
     // M4-A-1: collect all current-tree nodes matching `pred`, document order.
@@ -1162,54 +1216,14 @@ private:
         return out;
     }
 
-    // querySelectorAll: same minimal selector subset as query() (#id / .class /
-    // tagname), but returns ALL matches in document order. An empty / empty-token
-    // selector yields no matches.
+    // document.querySelectorAll: all matches over the whole tree, document order.
     std::vector<DomNode*> query_all(const std::string& raw) const {
-        std::size_t a = 0;
-        std::size_t b = raw.size();
-        while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
-        while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
-        const std::string sel = raw.substr(a, b - a);
-        if (sel.empty()) return {};
-        if (sel[0] == '#') {
-            const std::string id = sel.substr(1);
-            if (id.empty()) return {};
-            return collect([&](const DomNode* n) { return n->id == id; });
-        }
-        if (sel[0] == '.') {
-            const std::string cls = sel.substr(1);
-            if (cls.empty()) return {};
-            return collect([&](const DomNode* n) {
-                return std::find(n->classes.begin(), n->classes.end(), cls) !=
-                       n->classes.end();
-            });
-        }
-        const std::string tag = ascii_lower(sel);
-        return collect([&](const DomNode* n) { return n->tag == tag; });
+        return collect(selector_predicate(raw));
     }
 
-    // getElementsByTagName: ASCII case-insensitive tag match; "*" = all elements.
+    // document.getElementsByTagName: case-insensitive tag / "*", over the tree.
     std::vector<DomNode*> elements_by_tag(const std::string& raw) const {
-        if (raw == "*") {
-            return collect([](const DomNode*) { return true; });
-        }
-        const std::string tag = ascii_lower(raw);
-        return collect([&](const DomNode* n) { return n->tag == tag; });
-    }
-
-    // Build a plain JS Array of element host objects for `nodes` (same wrapping
-    // as document.scripts — no NodeList/HTMLCollection, no identity guarantee).
-    v8::Local<v8::Array> elements_array(v8::Isolate* isolate,
-                                        v8::Local<v8::Context> context,
-                                        const std::vector<DomNode*>& nodes) {
-        v8::Local<v8::Array> array =
-            v8::Array::New(isolate, static_cast<int>(nodes.size()));
-        for (std::size_t k = 0; k < nodes.size(); ++k) {
-            (void)array->Set(context, static_cast<std::uint32_t>(k),
-                             wrap_element(isolate, context, nodes[k]));
-        }
-        return array;
+        return collect(tag_predicate(raw));
     }
 
     std::string url_;
@@ -1418,6 +1432,24 @@ v8::Local<v8::Value> ElementHost::call_method(
             node_->children.insert(pos, child);
         }
         return args[0];
+    }
+    // M4-A-5 subtree queries: same minimal selector subset / tag rules as the
+    // document-level ones, but scoped to THIS element's current subtree (the
+    // element itself + its descendants, so the root may match). Plain JS Array
+    // for the *All / by-tag forms; null / first-match for querySelector.
+    if (name == "querySelector") {
+        return document_->wrap_element(
+            isolate, context, dfs_find(node_, selector_predicate(arg_string(0))));
+    }
+    if (name == "querySelectorAll") {
+        std::vector<DomNode*> out;
+        collect_matching(node_, selector_predicate(arg_string(0)), out);
+        return document_->elements_array(isolate, context, out);
+    }
+    if (name == "getElementsByTagName") {
+        std::vector<DomNode*> out;
+        collect_matching(node_, tag_predicate(arg_string(0)), out);
+        return document_->elements_array(isolate, context, out);
     }
     return v8::Undefined(isolate);
 }

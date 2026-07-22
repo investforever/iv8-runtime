@@ -167,6 +167,18 @@ node's `src`/`type` can be set/removed but this stays inert (no execution / load
 `currentScript`, M4-A-3). No reflection properties (`.src` / `.type` / `.title` /
 `.hidden` / `.dataset`), no `attributes` / `classList` / `style` /
 `toggleAttribute` / `hasAttributes` / `setAttributeNS`. No new Python API.
+M4-A-5 (subtree queries) adds element-level ``element.querySelector(selector)`` /
+``querySelectorAll(selector)`` / ``getElementsByTagName(tag)``, scoped to the
+element's CURRENT subtree — the element **itself plus its descendants** (so the
+root may match). They use the same minimal selector subset (``#id`` / ``.class`` /
+``tagname``; complex selectors → stable ``null`` / ``[]``) and tag rule (ASCII
+case-insensitive; ``"*"`` = all in subtree) as the document-level queries, return
+a plain JS ``Array`` (no ``NodeList`` / ``HTMLCollection`` / ``item`` /
+``namedItem`` / identity guarantee), and work on the live tree (tree edits +
+detached subtrees reflected). Document-level queries are unchanged; on a given
+subtree they agree. A ``<script>`` in a subtree is queryable but stays inert. No
+``matches`` / ``closest`` / ``getElementsByClassName`` / attribute selectors. No
+new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

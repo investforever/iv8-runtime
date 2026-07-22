@@ -201,17 +201,15 @@ def test_mutation_detaching_subtree_updates_queries():
         assert page.eval("document.querySelectorAll('.c').length") == 0
 
 
-# --- element does NOT get the query methods (document-only this round) -----------
+# --- returned collections carry no HTMLCollection extras ------------------------
+# (M4-A-5 added element-level querySelector[All]/getElementsByTagName; the
+# document-level returns still expose no item/namedItem.)
 
 @on_only
-def test_element_has_no_query_methods():
+def test_returned_collections_have_no_htmlcollection_extras():
     html = "<html><body><div id='d'></div></body></html>"
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        el = "document.getElementById('d')"
-        assert page.eval(f"typeof {el}.querySelectorAll") == "undefined"
-        assert page.eval(f"typeof {el}.getElementsByTagName") == "undefined"
-        # And the returned collections carry no HTMLCollection extras.
         assert page.eval("typeof document.querySelectorAll('div').item") == "undefined"
         assert page.eval("typeof document.getElementsByTagName('div').namedItem") == "undefined"
 
