@@ -82,6 +82,12 @@ walks ``"interactive"`` / ``readystatechange`` → ``DOMContentLoaded`` →
 ``"complete"`` / ``readystatechange`` → ``load``. A failed load leaves it
 ``"loading"`` and dispatches nothing. This is JS-side only — no new Python API,
 no new top-level object; ``Page.ready_state`` (M3-2) stays separate and unchanged.
+M3-7 (document.currentScript) adds a JS-side read-only ``document.currentScript``:
+while an HTML ``<script>`` (inline or ``<script src>``) runs it points at that
+script's element (``tagName === "SCRIPT"``, ``id`` visible), and is ``null``
+otherwise — a fresh page, host ``scripts=[...]``, ``page.eval``, timers, event
+listeners / lifecycle handlers, and after a load returns (including after a
+failed load). JS-side only; no new Python API, no new top-level object.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,6 +62,14 @@ public:
     // this after installing the generation to run the HTML scripts. Pure data
     // read (no V8 access).
     pybind11::list html_scripts();
+
+    // M3-7: run the HTML script at `index` (in html_scripts() order) with
+    // document.currentScript set to that <script> element for the duration, then
+    // cleared to null (even if it throws). `code`/`name` are resolved by Page.load
+    // (inline source, or a `<script src>` looked up in resources). Host
+    // scripts=[...] instead use eval() and never set currentScript.
+    void run_html_script(std::size_t index, const std::string& code,
+                         const std::string& name);
 
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the

@@ -164,7 +164,9 @@ class Page:
         strings to script-source strings; a bad shape raises ``TypeError`` before
         any load. A ``<script src>`` with no matching ``resources`` entry fails
         loudly (never silently skipped) via ``JSError`` (``resource_name`` = the
-        resolved URL) — no rollback.
+        resolved URL) — no rollback. M3-7: while each HTML script runs,
+        ``document.currentScript`` points at that ``<script>`` element (cleared to
+        ``null`` after, even on error); the host ``scripts`` below never set it.
 
         M3-1 external scripts (optional): ``scripts`` is a ``list`` of mappings,
         each with string ``name`` and ``code``. They run **after** the HTML
@@ -215,10 +217,10 @@ class Page:
         # resolved against base_url and looked up in the host-provided resources
         # (resource_name = the resolved URL). A missing resource fails loudly (no
         # silent skip) via the existing JSError path, with no rollback.
-        for entry in self._native.html_scripts():
+        for index, entry in enumerate(self._native.html_scripts()):
             src = entry["src"]
             if src is None:
-                self._native.eval(entry["code"], False, base_url)
+                code, name = entry["code"], base_url
             else:
                 url = urljoin(base_url, src)
                 if url not in resource_map:
@@ -230,7 +232,11 @@ class Page:
                         None,
                         None,
                     )
-                self._native.eval(resource_map[url], False, url)
+                code, name = resource_map[url], url
+            # M3-7: run via run_html_script so document.currentScript points at this
+            # <script> element during execution (and is cleared to null after, even
+            # on error). Host scripts=[...] below use plain eval (no currentScript).
+            self._native.run_html_script(index, code, name)
         # Then the M3-1 host-provided scripts (after the HTML scripts), in list
         # order. eval reuses the existing JSError path (resource_name = name) and
         # shares globals across all scripts; a failure propagates (no rollback).

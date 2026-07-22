@@ -379,6 +379,7 @@ struct ScriptRecord {
     bool has_src = false;
     std::string src;
     std::string code;
+    DomNode* node = nullptr;  // M3-7 backing <script> node (for document.currentScript)
 };
 
 bool is_void_element(const std::string& tag) {
@@ -567,6 +568,7 @@ void parse_html(const std::string& html,
             ScriptRecord record;
             record.has_src = raw->has_src;
             record.src = raw->src;
+            record.node = raw;  // M3-7: backing node for document.currentScript
             if (!raw->has_src) {  // inline: capture the raw JS source
                 record.code = html.substr(i, content_end - i);
             }
@@ -892,9 +894,17 @@ public:
     // "loading" -> "interactive" -> "complete" migration for an explicit load.
     void set_ready_state(const std::string& state) { ready_state_ = state; }
 
+    // M3-7: the <script> node currently executing (document.currentScript). Set to
+    // scripts_[index]'s node while that HTML script runs, cleared to null after.
+    void set_current_script(std::size_t index) {
+        current_script_ = index < scripts_.size() ? scripts_[index].node : nullptr;
+    }
+    void clear_current_script() { current_script_ = nullptr; }
+
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
-        return {"URL", "title", "readyState", "documentElement", "body"};
+        return {"URL", "title", "readyState", "documentElement", "body",
+                "currentScript"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + the M3-3 event-target methods.
@@ -920,6 +930,9 @@ public:
         if (name == "URL") return v8_string(isolate, url_);
         if (name == "title") return v8_string(isolate, title_);
         if (name == "readyState") return v8_string(isolate, ready_state_);
+        if (name == "currentScript") {  // M3-7: element while a HTML script runs, else null
+            return wrap_element(isolate, context, current_script_);
+        }
         if (name == "documentElement") {
             return wrap_element(isolate, context, find_tag("html"));
         }
@@ -1005,6 +1018,7 @@ private:
     std::string url_;
     std::string title_;
     std::string ready_state_ = "complete";  // M3-6 JS document.readyState
+    DomNode* current_script_ = nullptr;      // M3-7 document.currentScript backing
     std::vector<std::unique_ptr<DomNode>> pool_;
     std::vector<DomNode*> roots_;
     std::vector<ScriptRecord> scripts_;  // M3-5 scripts in document order
@@ -1401,6 +1415,30 @@ py::list PageState::html_scripts() {
         }
     }
     return result;
+}
+
+void PageState::run_html_script(std::size_t index, const std::string& code,
+                                const std::string& name) {
+    // M3-7: run one HTML script (Page.load resolves its code/name — inline source
+    // or a <script src> looked up in resources) with document.currentScript set to
+    // this script's element for the duration, then cleared to null. The guard
+    // clears even if eval throws, so the JSError propagates with currentScript
+    // already back to null. Host scripts=[...] use plain eval() (no currentScript).
+    auto* document = document_host_ != nullptr
+                         ? static_cast<DocumentHost*>(document_host_)
+                         : nullptr;
+    if (document != nullptr) {
+        document->set_current_script(index);
+    }
+    struct CurrentScriptGuard {
+        DocumentHost* document;
+        ~CurrentScriptGuard() {
+            if (document != nullptr) {
+                document->clear_current_script();
+            }
+        }
+    } guard{document};
+    state_->eval(code, false, name);
 }
 
 void PageState::load(const std::string& html, const std::string& base_url) {
