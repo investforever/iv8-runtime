@@ -177,13 +177,18 @@ class Page:
         — only ``run_timers()`` / ``run_jobs()`` execute them. ``scripts=None`` /
         ``[]`` and ``resources=None`` / ``{}`` degrade to the plain load path.
 
-        M3-4 lifecycle events: on a successful load (after all scripts run), two
-        JS events are auto-dispatched in a fixed order — ``DOMContentLoaded`` on
-        ``document``, then ``load`` on ``window`` — so page scripts registering
-        listeners for them (via ``document.addEventListener`` /
-        ``window.addEventListener``) are notified. A load that failed (a script
-        raised) dispatches neither. Each successful (repeated) load re-dispatches
-        both in its fresh generation.
+        Lifecycle (M3-4 + M3-6): the whole load runs with JS
+        ``document.readyState === "loading"`` — every script (HTML + ``scripts``)
+        observes ``"loading"``. On success, after all scripts run, a fixed
+        sequence fires on ``document`` then ``window``: readyState →
+        ``"interactive"``, ``readystatechange`` (document), ``DOMContentLoaded``
+        (document), readyState → ``"complete"``, ``readystatechange`` (document),
+        ``load`` (window). A load that failed (a script raised, or a missing
+        resource) dispatches none of these and leaves ``document.readyState`` at
+        ``"loading"``. Each successful (repeated) load re-walks the sequence in its
+        fresh generation. (A fresh ``Page()`` never entered ``"loading"`` — its
+        default generation reads ``"complete"``.) ``Page.ready_state`` keeps its
+        separate M3-2 semantics.
 
         Repeated calls replace the prior page state; a retained ``JSValue`` from a
         previous load follows the usual disposed/invalidation rules. Raises

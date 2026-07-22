@@ -887,6 +887,11 @@ public:
     // M3-5: the scripts found in the HTML, in document order (inline + external).
     const std::vector<ScriptRecord>& scripts() const { return scripts_; }
 
+    // M3-6: this generation's JS document.readyState. Defaults to "complete" (so
+    // a fresh Page()'s blank generation reads "complete"); Page.load drives the
+    // "loading" -> "interactive" -> "complete" migration for an explicit load.
+    void set_ready_state(const std::string& state) { ready_state_ = state; }
+
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
         return {"URL", "title", "readyState", "documentElement", "body"};
@@ -914,7 +919,7 @@ public:
                                       const std::string& name) override {
         if (name == "URL") return v8_string(isolate, url_);
         if (name == "title") return v8_string(isolate, title_);
-        if (name == "readyState") return v8_string(isolate, "complete");
+        if (name == "readyState") return v8_string(isolate, ready_state_);
         if (name == "documentElement") {
             return wrap_element(isolate, context, find_tag("html"));
         }
@@ -999,6 +1004,7 @@ private:
 
     std::string url_;
     std::string title_;
+    std::string ready_state_ = "complete";  // M3-6 JS document.readyState
     std::vector<std::unique_ptr<DomNode>> pool_;
     std::vector<DomNode*> roots_;
     std::vector<ScriptRecord> scripts_;  // M3-5 scripts in document order
@@ -1321,25 +1327,49 @@ void PageState::install_page(const std::string& base_url,
 }
 
 void PageState::dispatch_lifecycle_events() {
-    // M3-4: on a SUCCESSFUL load, auto-dispatch the two lifecycle events in a
-    // fixed order — DOMContentLoaded on document, then load on window. Called by
+    // On a SUCCESSFUL load, auto-run the load-completion lifecycle. Called by
     // Page.load's success path AFTER the scripts run; a load that failed (a script
     // raised) never reaches this. Runs under the operation guard, GIL released
     // around the JS listener calls (like the M2-4 timer pump).
+    //
+    // M3-6 fixed sequence on `document` (readyState migration + readystatechange)
+    // then `window`:
+    //   1) document.readyState = "interactive"
+    //   2) readystatechange on document   (listeners observe "interactive")
+    //   3) DOMContentLoaded on document
+    //   4) document.readyState = "complete"
+    //   5) readystatechange on document   (listeners observe "complete")
+    //   6) load on window
+    // readyState is set (a plain C++ member write, GIL-free) BEFORE each dispatch
+    // so a listener reading document.readyState sees the value for that step.
     state_->with_scope(
         [this](v8::Isolate* isolate, v8::Local<v8::Context> context) {
             py::gil_scoped_release release_gil;
             v8::Local<v8::Object> global = context->Global();
-            // DOMContentLoaded on document (event.target = the document object).
-            if (document_host_ != nullptr) {
+
+            // Resolve the document host + its JS object once (event.target).
+            auto* document = static_cast<DocumentHost*>(document_host_);
+            v8::Local<v8::Object> document_object;
+            bool have_document = false;
+            if (document != nullptr) {
                 v8::Local<v8::Value> document_value;
                 if (global->Get(context, v8_string(isolate, "document"))
                         .ToLocal(&document_value) &&
                     document_value->IsObject()) {
-                    static_cast<EventTargetHost*>(document_host_)
-                        ->dispatch_native(isolate, context, "DOMContentLoaded",
-                                          document_value.As<v8::Object>());
+                    document_object = document_value.As<v8::Object>();
+                    have_document = true;
                 }
+            }
+
+            if (have_document) {
+                document->set_ready_state("interactive");
+                document->dispatch_native(isolate, context, "readystatechange",
+                                          document_object);
+                document->dispatch_native(isolate, context, "DOMContentLoaded",
+                                          document_object);
+                document->set_ready_state("complete");
+                document->dispatch_native(isolate, context, "readystatechange",
+                                          document_object);
             }
             // load on window (event.target = the global object).
             if (window_events_) {
@@ -1384,6 +1414,14 @@ void PageState::load(const std::string& html, const std::string& base_url) {
     // rules. Then install a fresh context whose location reflects base_url.
     state_->dispose();
     install_page(base_url, html);
+    // M3-6: an explicit load enters the load lifecycle — this generation is
+    // "loading" (scripts observe it) until dispatch_lifecycle_events() migrates it
+    // to "interactive" then "complete" on success. (The constructor installs the
+    // default generation via install_page directly, so a fresh Page() stays
+    // "complete" and never enters "loading".) A plain member write — no V8 access.
+    if (document_host_ != nullptr) {
+        static_cast<DocumentHost*>(document_host_)->set_ready_state("loading");
+    }
 }
 
 PageState::~PageState() {
