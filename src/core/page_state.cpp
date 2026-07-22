@@ -1136,7 +1136,10 @@ void PageState::install_page(const std::string& base_url,
             // host-object methods; this is the event value they dispatch.
             v8::Local<v8::FunctionTemplate> event_template =
                 v8::FunctionTemplate::New(isolate, &event_constructor);
-            event_template->SetClassName(v8_string(isolate, "Event"));
+            // SetClassName requires a Local<String> (v8_string yields
+            // Local<Value>), so build the name string directly.
+            event_template->SetClassName(
+                v8::String::NewFromUtf8Literal(isolate, "Event"));
             (void)global->Set(
                 context, v8_string(isolate, "Event"),
                 event_template->GetFunction(context).ToLocalChecked());
