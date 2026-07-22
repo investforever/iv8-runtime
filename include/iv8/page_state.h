@@ -49,6 +49,12 @@ public:
     // -> JSContextBusyError; after dispose() -> JSContextDisposedError.
     void load(const std::string& html, const std::string& base_url);
 
+    // M3-4: dispatch the load-lifecycle events for a just-completed load —
+    // DOMContentLoaded on document, then load on window (fixed order). Called by
+    // Page.load's success path AFTER the host-provided scripts run; a failed load
+    // (a script raised) never calls it. Runs under the operation guard.
+    void dispatch_lifecycle_events();
+
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the
     // page's host objects + global roots + timers into it. Used by the ctor and
@@ -69,6 +75,14 @@ private:
     // dereferenced.
     std::shared_ptr<ContextState> state_;
     std::vector<std::unique_ptr<HostObject>> host_objects_;
+    // M3-4 window event target: holds window's event listeners. window itself
+    // stays the intrinsic global object; this is only its listener store and is
+    // NOT installed as a named global. Its listener handles are released by the
+    // teardown hook alongside host_objects_ (isolate-alive ordering).
+    std::unique_ptr<HostObject> window_events_;
+    // M3-4 observing pointer to the current DocumentHost (owned by host_objects_),
+    // used to dispatch DOMContentLoaded. Reset on each install_page.
+    HostObject* document_host_ = nullptr;
     [[maybe_unused]] PageBootstrap bootstrap_;
 };
 

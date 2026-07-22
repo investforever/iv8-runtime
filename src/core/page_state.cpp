@@ -573,19 +573,12 @@ public:
         listeners_.clear();
     }
 
-protected:
-    // The event-target method names every EventTargetHost exposes; concrete hosts
-    // append these to their own method_names().
-    static const std::vector<std::string>& event_method_names() {
-        static const std::vector<std::string> names = {
-            "addEventListener", "removeEventListener", "dispatchEvent"};
-        return names;
-    }
-
     // If `name` is an event-target method, handle it, write the JS result to
     // `out`, and return true; otherwise return false so the concrete host handles
     // its own methods. Runs inside the isolate/context scopes (during eval), under
-    // the operation guard, with the Python GIL already released.
+    // the operation guard, with the Python GIL already released. Public so the
+    // M3-4 window event functions (bare globals, not a host-object trampoline) can
+    // share the exact same semantics as document/element.
     bool handle_event_method(v8::Isolate* isolate, v8::Local<v8::Context> context,
                              const std::string& name,
                              const v8::FunctionCallbackInfo<v8::Value>& args,
@@ -603,10 +596,36 @@ protected:
             return true;
         }
         if (name == "dispatchEvent") {
-            out = dispatch(isolate, context, args);
+            // A non-object event dispatches to nothing (returns true).
+            if (args.Length() >= 1 && args[0]->IsObject()) {
+                fire(isolate, context, args[0].As<v8::Object>(), args.This());
+            }
+            out = v8::Boolean::New(isolate, true);
             return true;
         }
         return false;
+    }
+
+    // M3-4: dispatch a lifecycle event of `type` to this target's listeners from
+    // C++ (no JS caller), with `receiver` as event.target/currentTarget. Builds a
+    // minimal event object ({type, target, currentTarget} — same shape as
+    // `new Event(type)`) so auto-dispatch does not depend on the JS `Event` /
+    // `dispatchEvent` globals staying intact (a page script cannot break it).
+    void dispatch_native(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                         const std::string& type, v8::Local<v8::Object> receiver) {
+        v8::Local<v8::Object> event = v8::Object::New(isolate);
+        (void)event->Set(context, v8_string(isolate, "type"),
+                         v8_string(isolate, type));
+        fire(isolate, context, event, receiver);
+    }
+
+protected:
+    // The event-target method names every EventTargetHost exposes; concrete hosts
+    // append these to their own method_names().
+    static const std::vector<std::string>& event_method_names() {
+        static const std::vector<std::string> names = {
+            "addEventListener", "removeEventListener", "dispatchEvent"};
+        return names;
     }
 
 private:
@@ -671,17 +690,15 @@ private:
         }
     }
 
-    v8::Local<v8::Value> dispatch(v8::Isolate* isolate,
-                                  v8::Local<v8::Context> context,
-                                  const v8::FunctionCallbackInfo<v8::Value>& args) {
-        // A non-object event dispatches to nothing (returns true).
-        if (args.Length() < 1 || !args[0]->IsObject()) {
-            return v8::Boolean::New(isolate, true);
-        }
-        v8::Local<v8::Object> event = args[0].As<v8::Object>();
-        v8::Local<v8::Value> receiver = args.This();
-        // Set target/currentTarget to this receiver for the duration of dispatch
-        // (this flat model has no separate capture/bubble target chain).
+    // Shared dispatch core (used by both the JS dispatchEvent path and the M3-4
+    // C++ dispatch_native): set target/currentTarget to `receiver`, read the
+    // event's type, and fire every listener registered for that type on this
+    // target, in registration order, with `this` = receiver and the event as the
+    // single argument. Snapshots the listener list so add/removeEventListener
+    // called by a listener does not change THIS dispatch; a throwing listener is
+    // swallowed so the rest still run. No capture/bubble, no cancellation.
+    void fire(v8::Isolate* isolate, v8::Local<v8::Context> context,
+              v8::Local<v8::Object> event, v8::Local<v8::Value> receiver) {
         (void)event->Set(context, v8_string(isolate, "target"), receiver);
         (void)event->Set(context, v8_string(isolate, "currentTarget"), receiver);
 
@@ -698,32 +715,51 @@ private:
         }
 
         auto it = listeners_.find(type);
-        if (it != listeners_.end()) {
-            // Snapshot the listeners so add/removeEventListener called by a
-            // listener does not change THIS dispatch (stable == registration
-            // order at dispatch time).
-            std::vector<v8::Local<v8::Function>> snapshot;
-            snapshot.reserve(it->second.size());
-            for (v8::Global<v8::Function>& fn : it->second) {
-                snapshot.push_back(fn.Get(isolate));
-            }
-            v8::Local<v8::Value> event_arg = event;
-            for (v8::Local<v8::Function>& fn : snapshot) {
-                v8::TryCatch try_catch(isolate);
-                (void)fn->Call(context, receiver, 1, &event_arg);
-                if (try_catch.HasCaught()) {
-                    try_catch.Reset();  // one listener's error never stops the rest
-                }
+        if (it == listeners_.end()) {
+            return;
+        }
+        std::vector<v8::Local<v8::Function>> snapshot;
+        snapshot.reserve(it->second.size());
+        for (v8::Global<v8::Function>& fn : it->second) {
+            snapshot.push_back(fn.Get(isolate));
+        }
+        v8::Local<v8::Value> event_arg = event;
+        for (v8::Local<v8::Function>& fn : snapshot) {
+            v8::TryCatch try_catch(isolate);
+            (void)fn->Call(context, receiver, 1, &event_arg);
+            if (try_catch.HasCaught()) {
+                try_catch.Reset();  // one listener's error never stops the rest
             }
         }
-        // No cancellation in this minimal model (no preventDefault) -> always true.
-        return v8::Boolean::New(isolate, true);
     }
 
     // Per-type listener lists (registration order). Global handles are released in
     // release_v8_handles() before isolate disposal.
     std::unordered_map<std::string, std::vector<v8::Global<v8::Function>>>
         listeners_;
+};
+
+// M3-4 window event target. window / globalThis / self stay the intrinsic global
+// object (M2-2, so window === globalThis === self and globals live on it); this
+// backing object ONLY holds the global's event listeners and provides the
+// add/remove/dispatch semantics (inherited from EventTargetHost). It is NOT
+// installed as a named global host object — the three window.* methods are bare
+// global functions whose External data points at this instance (see install_page
+// / window_event_method), so window stays a real object, not a host wrapper.
+class WindowEventTarget : public EventTargetHost {
+public:
+    std::string global_name() const override { return std::string(); }  // never installed
+    std::vector<std::string> property_names() const override { return {}; }
+    std::vector<std::string> method_names() const override { return {}; }
+    v8::Local<v8::Value> get_property(v8::Isolate* isolate, v8::Local<v8::Context>,
+                                      const std::string&) override {
+        return v8::Undefined(isolate);
+    }
+    v8::Local<v8::Value> call_method(
+        v8::Isolate* isolate, v8::Local<v8::Context>, const std::string&,
+        const v8::FunctionCallbackInfo<v8::Value>&) override {
+        return v8::Undefined(isolate);
+    }
 };
 
 // M2-6/M2-7 element host object. Read-only, minimal node/element surface:
@@ -1079,6 +1115,37 @@ void event_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
                     v8::Null(isolate));
 }
 
+// M3-4 window event target functions. window is the intrinsic global object (not
+// a host object), so its addEventListener / removeEventListener / dispatchEvent
+// are installed as bare global functions whose FunctionTemplate Data is an
+// External pointing at the page's WindowEventTarget. They forward to the shared
+// EventTargetHost semantics (dedupe, snapshot dispatch, swallow, order); because
+// they are called as `window.method(...)`, args.This() == window, so
+// event.target == window.
+void window_event_method(const v8::FunctionCallbackInfo<v8::Value>& info,
+                         const char* method_name) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    auto* target =
+        static_cast<EventTargetHost*>(info.Data().As<v8::External>()->Value());
+    v8::Local<v8::Value> out;
+    if (target->handle_event_method(isolate, context, method_name, info, out)) {
+        info.GetReturnValue().Set(out);
+    }
+}
+
+void window_add_event_listener(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    window_event_method(info, "addEventListener");
+}
+
+void window_remove_event_listener(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    window_event_method(info, "removeEventListener");
+}
+
+void window_dispatch_event(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    window_event_method(info, "dispatchEvent");
+}
+
 }  // namespace
 
 PageState::PageState() {
@@ -1091,13 +1158,17 @@ void PageState::install_page(const std::string& base_url,
     bootstrap_ = PageBootstrap{html, base_url};
 
     state_ = std::make_shared<ContextState>();
-    // M3-3: before this context's isolate is disposed, release the host objects'
-    // event-listener Global handles (teardown ordering, mirroring timers). The
-    // hook reads host_objects_ lazily at teardown time, so it sees whatever this
-    // generation installed below. DocumentHost forwards to its wrapped elements.
+    // M3-3/M3-4: before this context's isolate is disposed, release the event-
+    // listener Global handles (teardown ordering, mirroring timers). The hook
+    // reads host_objects_ + window_events_ lazily at teardown time, so it sees
+    // whatever this generation installed below. DocumentHost forwards to its
+    // wrapped elements; window_events_ holds window's listeners.
     state_->set_on_teardown([this]() {
         for (const std::unique_ptr<HostObject>& host : host_objects_) {
             host->release_v8_handles();
+        }
+        if (window_events_) {
+            window_events_->release_v8_handles();
         }
     });
     host_objects_.clear();
@@ -1106,8 +1177,12 @@ void PageState::install_page(const std::string& base_url,
     host_objects_.push_back(std::make_unique<NavigatorHost>());  // M2-3 navigator
     host_objects_.push_back(  // M2-3 location, sourced from this page's base URL
         std::make_unique<LocationHost>(decompose_url(base_url)));
-    host_objects_.push_back(  // M2-6 document, from the loaded html + base URL
-        std::make_unique<DocumentHost>(html, base_url));
+    auto document = std::make_unique<DocumentHost>(html, base_url);  // M2-6
+    document_host_ = document.get();  // M3-4 observing ptr for lifecycle dispatch
+    host_objects_.push_back(std::move(document));
+    // M3-4 window event target: NOT installed as a named global (window stays the
+    // intrinsic global object); it only backs window's listener store.
+    window_events_ = std::make_unique<WindowEventTarget>();
 
     // Install the host objects and the browser-like global roots into the
     // context. window / self are aliases of the global object; globalThis is the
@@ -1143,6 +1218,54 @@ void PageState::install_page(const std::string& base_url,
             (void)global->Set(
                 context, v8_string(isolate, "Event"),
                 event_template->GetFunction(context).ToLocalChecked());
+            // M3-4: window becomes an event target. window is the intrinsic global
+            // object, so its three event methods are bare globals whose External
+            // data points at window_events_ (created above). They therefore share
+            // EventTargetHost's exact semantics with document/element.
+            v8::Local<v8::External> window_data = v8::External::New(
+                isolate, static_cast<EventTargetHost*>(window_events_.get()));
+            auto install_window_event_fn = [&](const char* name,
+                                               v8::FunctionCallback callback) {
+                v8::Local<v8::Function> fn =
+                    v8::FunctionTemplate::New(isolate, callback, window_data)
+                        ->GetFunction(context)
+                        .ToLocalChecked();
+                (void)global->Set(context, v8_string(isolate, name), fn);
+            };
+            install_window_event_fn("addEventListener",
+                                    &window_add_event_listener);
+            install_window_event_fn("removeEventListener",
+                                    &window_remove_event_listener);
+            install_window_event_fn("dispatchEvent", &window_dispatch_event);
+        });
+}
+
+void PageState::dispatch_lifecycle_events() {
+    // M3-4: on a SUCCESSFUL load, auto-dispatch the two lifecycle events in a
+    // fixed order — DOMContentLoaded on document, then load on window. Called by
+    // Page.load's success path AFTER the scripts run; a load that failed (a script
+    // raised) never reaches this. Runs under the operation guard, GIL released
+    // around the JS listener calls (like the M2-4 timer pump).
+    state_->with_scope(
+        [this](v8::Isolate* isolate, v8::Local<v8::Context> context) {
+            py::gil_scoped_release release_gil;
+            v8::Local<v8::Object> global = context->Global();
+            // DOMContentLoaded on document (event.target = the document object).
+            if (document_host_ != nullptr) {
+                v8::Local<v8::Value> document_value;
+                if (global->Get(context, v8_string(isolate, "document"))
+                        .ToLocal(&document_value) &&
+                    document_value->IsObject()) {
+                    static_cast<EventTargetHost*>(document_host_)
+                        ->dispatch_native(isolate, context, "DOMContentLoaded",
+                                          document_value.As<v8::Object>());
+                }
+            }
+            // load on window (event.target = the global object).
+            if (window_events_) {
+                static_cast<EventTargetHost*>(window_events_.get())
+                    ->dispatch_native(isolate, context, "load", global);
+            }
         });
 }
 

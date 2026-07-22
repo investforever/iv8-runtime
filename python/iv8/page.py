@@ -143,6 +143,14 @@ class Page:
         NOT run in the background — only ``run_timers()`` / ``run_jobs()`` execute
         them. ``scripts=None`` / ``[]`` is exactly the M2 load path.
 
+        M3-4 lifecycle events: on a successful load (after all scripts run), two
+        JS events are auto-dispatched in a fixed order — ``DOMContentLoaded`` on
+        ``document``, then ``load`` on ``window`` — so page scripts registering
+        listeners for them (via ``document.addEventListener`` /
+        ``window.addEventListener``) are notified. A load that failed (a script
+        raised) dispatches neither. Each successful (repeated) load re-dispatches
+        both in its fresh generation.
+
         Repeated calls replace the prior page state; a retained ``JSValue`` from a
         previous load follows the usual disposed/invalidation rules. Raises
         ``JSContextBusyError`` if an operation is active, and
@@ -166,6 +174,11 @@ class Page:
         # and shares globals across scripts; a failure propagates (no rollback).
         for name, code in normalized:
             self._native.eval(code, False, name)
+        # M3-4: on a successful load, auto-dispatch the lifecycle events in a fixed
+        # order — DOMContentLoaded on document, then load on window. This runs only
+        # after every script succeeded (a failed script raised above and skipped
+        # this), so a failed load dispatches no lifecycle events.
+        self._native.dispatch_lifecycle_events()
         self._ready_state = "complete"
 
     def dispose(self) -> None:

@@ -58,7 +58,13 @@ global ``Event`` constructor (``new Event(type)`` → ``type`` / ``target`` /
 ``dispatchEvent`` (flat, registration-order listener lists; no capture/bubble, no
 ``preventDefault``, no lifecycle events; listeners are JS functions). Like
 M2-6…M2-8 it adds NO new Python API — it is reachable only via ``Page.eval`` —
-and ``Page`` is not an event target.
+and ``Page`` is not an event target. M3-4 (Lifecycle Events) makes ``window`` a
+JS-side event target too (``window.addEventListener`` /
+``removeEventListener`` / ``dispatchEvent``) and, on a successful
+``Page.load(...)`` (after scripts run), auto-dispatches two JS events in a fixed
+order — ``DOMContentLoaded`` on ``document``, then ``load`` on ``window``; a
+failed load dispatches neither. This adds no new Python API and no new top-level
+object; ``Page.ready_state`` (M3-2) and JS ``document.readyState`` are unchanged.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

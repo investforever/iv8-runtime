@@ -17,5 +17,7 @@ void register_page(py::module_& module) {
         .def("dispose", &iv8::PageState::dispose)
         .def("run_timers", &iv8::PageState::run_timers)
         .def("run_jobs", &iv8::PageState::run_jobs)
-        .def("load", &iv8::PageState::load, py::arg("html"), py::arg("base_url"));
+        .def("load", &iv8::PageState::load, py::arg("html"), py::arg("base_url"))
+        .def("dispatch_lifecycle_events",
+             &iv8::PageState::dispatch_lifecycle_events);
 }
