@@ -546,12 +546,192 @@ DomNode* find_first(const std::vector<DomNode*>& roots,
 
 class DocumentHost;  // ElementHost holds a back-pointer to its document
 
+// --- M3-3 minimal event model ------------------------------------------------
+// EventTargetHost is a mixin for host objects that support events (document,
+// element). It stores JS listener functions per event type as isolate-safe
+// Global handles and implements addEventListener / removeEventListener /
+// dispatchEvent.
+//
+// This is deliberately NOT the DOM Events spec: a single flat listener list per
+// type, fired in registration order ON THE TARGET ITSELF. No capture/bubble
+// phases, no preventDefault/stopPropagation, no listener options (once/capture/
+// passive), no default actions, and no lifecycle events (DOMContentLoaded/load).
+// Listeners are JS functions only — there is no JS->Python callback bridge in
+// this phase. The retained Global handles are released via release_v8_handles()
+// before the owning context's isolate is disposed (PageState wires this into
+// ContextState's teardown hook).
+class EventTargetHost : public HostObject {
+public:
+    // Reset every retained listener handle. Runs (via PageState's teardown hook)
+    // while the isolate is still alive, mirroring the timer-handle reset.
+    void release_v8_handles() noexcept override {
+        for (auto& entry : listeners_) {
+            for (v8::Global<v8::Function>& fn : entry.second) {
+                fn.Reset();
+            }
+        }
+        listeners_.clear();
+    }
+
+protected:
+    // The event-target method names every EventTargetHost exposes; concrete hosts
+    // append these to their own method_names().
+    static const std::vector<std::string>& event_method_names() {
+        static const std::vector<std::string> names = {
+            "addEventListener", "removeEventListener", "dispatchEvent"};
+        return names;
+    }
+
+    // If `name` is an event-target method, handle it, write the JS result to
+    // `out`, and return true; otherwise return false so the concrete host handles
+    // its own methods. Runs inside the isolate/context scopes (during eval), under
+    // the operation guard, with the Python GIL already released.
+    bool handle_event_method(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                             const std::string& name,
+                             const v8::FunctionCallbackInfo<v8::Value>& args,
+                             v8::Local<v8::Value>& out) {
+        if (name == "addEventListener") {
+            add_listener(isolate, type_arg(isolate, context, args, 0),
+                         listener_arg(args, 1));
+            out = v8::Undefined(isolate);
+            return true;
+        }
+        if (name == "removeEventListener") {
+            remove_listener(isolate, type_arg(isolate, context, args, 0),
+                            listener_arg(args, 1));
+            out = v8::Undefined(isolate);
+            return true;
+        }
+        if (name == "dispatchEvent") {
+            out = dispatch(isolate, context, args);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    // args[index] coerced to a UTF-8 string (the event `type`), or "".
+    static std::string type_arg(v8::Isolate* isolate,
+                                v8::Local<v8::Context> context,
+                                const v8::FunctionCallbackInfo<v8::Value>& args,
+                                int index) {
+        if (index >= args.Length()) {
+            return std::string();
+        }
+        v8::Local<v8::String> str;
+        if (!args[index]->ToString(context).ToLocal(&str)) {
+            return std::string();
+        }
+        v8::String::Utf8Value utf8(isolate, str);
+        return *utf8 != nullptr
+                   ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
+                   : std::string();
+    }
+
+    // args[index] if it is a JS function, else an empty handle (non-callable
+    // listeners are ignored, keeping add/removeEventListener non-throwing).
+    static v8::Local<v8::Function> listener_arg(
+        const v8::FunctionCallbackInfo<v8::Value>& args, int index) {
+        if (index < args.Length() && args[index]->IsFunction()) {
+            return args[index].As<v8::Function>();
+        }
+        return v8::Local<v8::Function>();
+    }
+
+    void add_listener(v8::Isolate* isolate, const std::string& type,
+                      v8::Local<v8::Function> callback) {
+        if (callback.IsEmpty()) {
+            return;  // non-callable listener: ignored
+        }
+        std::vector<v8::Global<v8::Function>>& bucket = listeners_[type];
+        for (v8::Global<v8::Function>& existing : bucket) {
+            if (existing.Get(isolate)->StrictEquals(callback)) {
+                return;  // dedupe: an identical (type, callback) registers once
+            }
+        }
+        bucket.emplace_back(isolate, callback);
+    }
+
+    void remove_listener(v8::Isolate* isolate, const std::string& type,
+                         v8::Local<v8::Function> callback) {
+        if (callback.IsEmpty()) {
+            return;
+        }
+        auto it = listeners_.find(type);
+        if (it == listeners_.end()) {
+            return;
+        }
+        std::vector<v8::Global<v8::Function>>& bucket = it->second;
+        for (auto entry = bucket.begin(); entry != bucket.end(); ++entry) {
+            if (entry->Get(isolate)->StrictEquals(callback)) {
+                entry->Reset();
+                bucket.erase(entry);
+                return;  // remove only the first exact match
+            }
+        }
+    }
+
+    v8::Local<v8::Value> dispatch(v8::Isolate* isolate,
+                                  v8::Local<v8::Context> context,
+                                  const v8::FunctionCallbackInfo<v8::Value>& args) {
+        // A non-object event dispatches to nothing (returns true).
+        if (args.Length() < 1 || !args[0]->IsObject()) {
+            return v8::Boolean::New(isolate, true);
+        }
+        v8::Local<v8::Object> event = args[0].As<v8::Object>();
+        v8::Local<v8::Value> receiver = args.This();
+        // Set target/currentTarget to this receiver for the duration of dispatch
+        // (this flat model has no separate capture/bubble target chain).
+        (void)event->Set(context, v8_string(isolate, "target"), receiver);
+        (void)event->Set(context, v8_string(isolate, "currentTarget"), receiver);
+
+        std::string type;
+        v8::Local<v8::Value> type_value;
+        if (event->Get(context, v8_string(isolate, "type")).ToLocal(&type_value)) {
+            v8::Local<v8::String> str;
+            if (type_value->ToString(context).ToLocal(&str)) {
+                v8::String::Utf8Value utf8(isolate, str);
+                if (*utf8 != nullptr) {
+                    type.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+                }
+            }
+        }
+
+        auto it = listeners_.find(type);
+        if (it != listeners_.end()) {
+            // Snapshot the listeners so add/removeEventListener called by a
+            // listener does not change THIS dispatch (stable == registration
+            // order at dispatch time).
+            std::vector<v8::Local<v8::Function>> snapshot;
+            snapshot.reserve(it->second.size());
+            for (v8::Global<v8::Function>& fn : it->second) {
+                snapshot.push_back(fn.Get(isolate));
+            }
+            v8::Local<v8::Value> event_arg = event;
+            for (v8::Local<v8::Function>& fn : snapshot) {
+                v8::TryCatch try_catch(isolate);
+                (void)fn->Call(context, receiver, 1, &event_arg);
+                if (try_catch.HasCaught()) {
+                    try_catch.Reset();  // one listener's error never stops the rest
+                }
+            }
+        }
+        // No cancellation in this minimal model (no preventDefault) -> always true.
+        return v8::Boolean::New(isolate, true);
+    }
+
+    // Per-type listener lists (registration order). Global handles are released in
+    // release_v8_handles() before isolate disposal.
+    std::unordered_map<std::string, std::vector<v8::Global<v8::Function>>>
+        listeners_;
+};
+
 // M2-6/M2-7 element host object. Read-only, minimal node/element surface:
 // tagName / nodeName / nodeType / id / className / textContent + parentNode /
 // childNodes / children + getAttribute / hasAttribute. No mutation, no full
 // Node/Element layer. parent/child accessors wrap related nodes back through the
 // owning DocumentHost. Methods are defined out-of-line (below DocumentHost).
-class ElementHost : public HostObject {
+class ElementHost : public EventTargetHost {
 public:
     ElementHost(DomNode* node, DocumentHost* document)
         : node_(node), document_(document) {}
@@ -562,7 +742,12 @@ public:
                 "textContent", "parentNode", "childNodes", "children"};
     }
     std::vector<std::string> method_names() const override {
-        return {"getAttribute", "hasAttribute", "setAttribute"};  // M2-8 setAttribute
+        // M2-7/M2-8 element methods + the M3-3 event-target methods.
+        std::vector<std::string> names = {"getAttribute", "hasAttribute",
+                                          "setAttribute"};
+        const std::vector<std::string>& events = event_method_names();
+        names.insert(names.end(), events.begin(), events.end());
+        return names;
     }
     // M2-8: textContent is writable (element.textContent = ...).
     std::vector<std::string> writable_property_names() const override {
@@ -588,7 +773,7 @@ private:
 // M2-6 document host object (M2-7 hands out node-capable elements). Owns the
 // parsed tree + element wrappers for this page generation, so a load()/dispose()
 // that tears down the context invalidates everything together.
-class DocumentHost : public HostObject {
+class DocumentHost : public EventTargetHost {
 public:
     DocumentHost(const std::string& html, std::string url)
         : url_(std::move(url)), title_(extract_title(html)) {
@@ -600,7 +785,21 @@ public:
         return {"URL", "title", "readyState", "documentElement", "body"};
     }
     std::vector<std::string> method_names() const override {
-        return {"getElementById", "querySelector"};
+        // M2-6 document methods + the M3-3 event-target methods.
+        std::vector<std::string> names = {"getElementById", "querySelector"};
+        const std::vector<std::string>& events = event_method_names();
+        names.insert(names.end(), events.begin(), events.end());
+        return names;
+    }
+
+    // Release the document's own listener handles AND every wrapped element's
+    // (the ElementHosts are owned here, not in PageState::host_objects_, so the
+    // teardown hook only reaches them through the document).
+    void release_v8_handles() noexcept override {
+        EventTargetHost::release_v8_handles();
+        for (const std::unique_ptr<ElementHost>& element : elements_) {
+            element->release_v8_handles();
+        }
     }
 
     v8::Local<v8::Value> get_property(v8::Isolate* isolate,
@@ -622,6 +821,11 @@ public:
         v8::Isolate* isolate, v8::Local<v8::Context> context,
         const std::string& name,
         const v8::FunctionCallbackInfo<v8::Value>& args) override {
+        // M3-3: addEventListener / removeEventListener / dispatchEvent first.
+        v8::Local<v8::Value> event_result;
+        if (handle_event_method(isolate, context, name, args, event_result)) {
+            return event_result;
+        }
         std::string arg;
         if (args.Length() > 0) {
             v8::String::Utf8Value utf8(isolate, args[0]);
@@ -749,8 +953,13 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
 }
 
 v8::Local<v8::Value> ElementHost::call_method(
-    v8::Isolate* isolate, v8::Local<v8::Context>, const std::string& name,
+    v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // M3-3: addEventListener / removeEventListener / dispatchEvent first.
+    v8::Local<v8::Value> event_result;
+    if (handle_event_method(isolate, context, name, args, event_result)) {
+        return event_result;
+    }
     const auto arg_string = [&](int index) -> std::string {
         if (index >= args.Length()) return std::string();
         v8::String::Utf8Value utf8(isolate, args[index]);
@@ -845,6 +1054,31 @@ void install_global_function(v8::Isolate* isolate, v8::Local<v8::Context> contex
     (void)global->Set(context, v8_string(isolate, name), fn);
 }
 
+// M3-3 minimal Event constructor. `new Event(type)` yields a plain JS object with
+// `type` (string, coerced from the first argument) plus `target` and
+// `currentTarget` (null until a dispatch sets them). Intended to be used with
+// `new`. This is a minimal value object only — no bubbles/cancelable/
+// defaultPrevented/timeStamp fields and no stopPropagation/preventDefault methods.
+void event_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = info.This();
+    std::string type;
+    if (info.Length() > 0) {
+        v8::Local<v8::String> str;
+        if (info[0]->ToString(context).ToLocal(&str)) {
+            v8::String::Utf8Value utf8(isolate, str);
+            if (*utf8 != nullptr) {
+                type.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+            }
+        }
+    }
+    (void)self->Set(context, v8_string(isolate, "type"), v8_string(isolate, type));
+    (void)self->Set(context, v8_string(isolate, "target"), v8::Null(isolate));
+    (void)self->Set(context, v8_string(isolate, "currentTarget"),
+                    v8::Null(isolate));
+}
+
 }  // namespace
 
 PageState::PageState() {
@@ -857,6 +1091,15 @@ void PageState::install_page(const std::string& base_url,
     bootstrap_ = PageBootstrap{html, base_url};
 
     state_ = std::make_shared<ContextState>();
+    // M3-3: before this context's isolate is disposed, release the host objects'
+    // event-listener Global handles (teardown ordering, mirroring timers). The
+    // hook reads host_objects_ lazily at teardown time, so it sees whatever this
+    // generation installed below. DocumentHost forwards to its wrapped elements.
+    state_->set_on_teardown([this]() {
+        for (const std::unique_ptr<HostObject>& host : host_objects_) {
+            host->release_v8_handles();
+        }
+    });
     host_objects_.clear();
     host_objects_.push_back(std::make_unique<HostProbe>());    // M2-1 probe
     host_objects_.push_back(std::make_unique<ConsoleHost>());  // M2-2 console
@@ -888,6 +1131,15 @@ void PageState::install_page(const std::string& base_url,
                                     &set_interval_callback);
             install_global_function(isolate, context, global, "clearInterval",
                                     &clear_timer_callback);
+            // M3-3 minimal Event constructor (global `Event`). document/element
+            // expose addEventListener/removeEventListener/dispatchEvent via their
+            // host-object methods; this is the event value they dispatch.
+            v8::Local<v8::FunctionTemplate> event_template =
+                v8::FunctionTemplate::New(isolate, &event_constructor);
+            event_template->SetClassName(v8_string(isolate, "Event"));
+            (void)global->Set(
+                context, v8_string(isolate, "Event"),
+                event_template->GetFunction(context).ToLocalChecked());
         });
 }
 

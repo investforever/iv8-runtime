@@ -69,6 +69,15 @@ void ContextState::teardown() noexcept {
         entry.second.callback.Reset();
     }
     timers_.clear();
+    // 1c. M3-3: release host-object V8 handles (event listeners) while the isolate
+    // is still alive — same ordering requirement as the timer handles above.
+    if (on_teardown_) {
+        try {
+            on_teardown_();
+        } catch (...) {
+            // teardown() is noexcept; a hook failure must not block isolate cleanup.
+        }
+    }
     // 2. reset the persistent context, 3. dispose isolate + 4. release allocator
     context_.Reset();
     isolate_host_.reset();

@@ -51,7 +51,14 @@ src>``; the only public change is the ``Page.load(scripts=...)`` parameter. M3-2
 ``"complete"``): ``"complete"`` on a fresh page and after a successful ``load``,
 ``"loading"`` while loading and after a load that did not complete. It is a
 Python-side lifecycle distinct from the JS ``document.readyState`` (which stays
-``"complete"``), and is the only new public surface in M3-2.
+``"complete"``), and is the only new public surface in M3-2. M3-3 (Basic Event
+Model) adds a minimal JS-side event model on ``document`` and ``element``: a
+global ``Event`` constructor (``new Event(type)`` → ``type`` / ``target`` /
+``currentTarget``) plus ``addEventListener`` / ``removeEventListener`` /
+``dispatchEvent`` (flat, registration-order listener lists; no capture/bubble, no
+``preventDefault``, no lifecycle events; listeners are JS functions). Like
+M2-6…M2-8 it adds NO new Python API — it is reachable only via ``Page.eval`` —
+and ``Page`` is not an event target.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

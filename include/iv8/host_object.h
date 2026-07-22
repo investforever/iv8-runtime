@@ -56,6 +56,13 @@ public:
         v8::Isolate* isolate, v8::Local<v8::Context> context,
         const std::string& name,
         const v8::FunctionCallbackInfo<v8::Value>& args) = 0;
+
+    // Release any V8 persistent (Global) handles this host retains — e.g. M3-3
+    // event listeners. Default: none. It MUST run while the owning context's
+    // isolate is still alive (a Global cannot be reset after isolate disposal),
+    // so PageState invokes it via ContextState's teardown hook, before the
+    // context/isolate are torn down. Must be noexcept (teardown never throws).
+    virtual void release_v8_handles() noexcept {}
 };
 
 // Build (WITHOUT installing) a JS object backed by `host`: an ObjectTemplate with

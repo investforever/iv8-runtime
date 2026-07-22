@@ -84,6 +84,15 @@ public:
     // Manual pump: drain the pending microtask (job) queue.
     void run_jobs();
 
+    // M3-3: install an optional hook that teardown() runs while the isolate is
+    // still alive, right after the timer handles are reset and before the context
+    // /isolate are torn down. PageState uses it to release host-object V8 handles
+    // (event listeners) in the correct order. The hook must not throw (teardown
+    // is noexcept); teardown swallows any exception defensively.
+    void set_on_teardown(std::function<void()> fn) {
+        on_teardown_ = std::move(fn);
+    }
+
     // Explicit dispose: rejects if an operation is active (ContextBusyError),
     // otherwise runs the ordered teardown.
     void dispose();
@@ -136,6 +145,10 @@ private:
     std::unordered_map<std::int64_t, TimerEntry> timers_;
     std::int64_t next_timer_id_ = 1;
     std::uint64_t next_timer_seq_ = 0;
+
+    // M3-3 teardown hook (see set_on_teardown). Empty unless PageState installs
+    // it; a bare JSContext leaves it unset.
+    std::function<void()> on_teardown_;
 };
 
 // Thin per-JSContext owner: holds the shared state and delegates. This is the
