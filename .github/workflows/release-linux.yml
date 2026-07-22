@@ -10,6 +10,17 @@ on:
     tags:
       - 'v*'
 
+# Serialize runs of this workflow: the V8 monolith cache is keyed on the build
+# scripts + pin, so two overlapping runs (e.g. a re-dispatch) share one key. A
+# cache being created by an in-flight run is NOT visible to a concurrent run, so
+# the second run would cache-miss and rebuild V8 (~40 min) and then fail to save
+# ("another job may be creating this cache"). Queue instead — cancel-in-progress:
+# false lets the in-flight run finish and populate the cache, so the next run
+# hits it. (This is cache contention, not eviction; total cache usage is small.)
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   contents: write  # create a GitHub Release and attach wheels on tag builds
 

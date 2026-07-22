@@ -11,6 +11,15 @@ on:
     tags:
       - 'v*'
 
+# Serialize runs of this workflow so overlapping runs don't race the V8 monolith
+# cache (a cache being created by an in-flight run is invisible to a concurrent
+# run -> needless rebuild + "another job may be creating this cache" on save).
+# cancel-in-progress: false queues the newer run until the in-flight one finishes
+# and populates the cache, so the next run hits it. See release-linux.yml.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
