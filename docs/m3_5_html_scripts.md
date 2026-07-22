@@ -35,8 +35,10 @@ On a `Page.load(...)`:
    `location`/`document` from `base_url`/`html`.
 3. Run the document's **HTML scripts in document order** (inline and external
    interleaved exactly as they appear):
-   - **inline** `<script>...</script>` — its raw JS source runs directly, with
-     `resource_name` = the document `base_url`.
+   - **inline** `<script>...</script>` — its raw JS source runs directly.
+     (Its `resource_name` was tightened in **M3-11** to
+     `"{base_url}#inline-script-{n}"`; see `docs/m3_11_script_errors.md` /
+     `docs/m3_summary.md`.)
    - **`<script src="...">`** — `src` is resolved against `base_url` (RFC-3986
      join) to an absolute URL, looked up in `resources`, and that source runs
      with `resource_name` = the resolved URL.
@@ -65,8 +67,9 @@ wins). A self-closing `<script/>` carries no body and contributes no script. The
   URL, a clear message). It is **never silently skipped**. This reuses the
   existing exception type (no new type) and the M3-1 failure model.
 - **Script execution failure** (inline, external, or M3-1) — raises `JSError` via
-  the existing eval path (`resource_name` = the script's origin: base URL for
-  inline, resolved URL for external, `name` for M3-1).
+  the existing eval path (`resource_name` = the script's origin: the M3-11 inline
+  name `"{base_url}#inline-script-{n}"` for inline, the resolved URL for external,
+  `name` for M3-1).
 - **No rollback** (M3-1 model): on any failure the exception propagates out of
   `load`, effects of scripts that already ran persist, the page generation stays
   installed and usable, and later scripts do not run.
