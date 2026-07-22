@@ -164,7 +164,12 @@ class Page:
         strings to script-source strings; a bad shape raises ``TypeError`` before
         any load. A ``<script src>`` with no matching ``resources`` entry fails
         loudly (never silently skipped) via ``JSError`` (``resource_name`` = the
-        resolved URL) — no rollback. M3-7: while each HTML script runs,
+        resolved URL) — no rollback. M3-11: an inline ``<script>`` that fails
+        reports a deterministic ``JSError.resource_name`` of
+        ``"{base_url}#inline-script-{n}"``, where ``n`` is the inline script's
+        1-based document-order position among inline ``<script>`` nodes (external
+        ``<script src>`` and host ``scripts`` are not counted; a non-executable
+        inline script still occupies its number). M3-7: while each HTML script runs,
         ``document.currentScript`` points at that ``<script>`` element (cleared to
         ``null`` after, even on error); the host ``scripts`` below never set it.
         M3-10: only minimal *classic* scripts execute — a ``<script>`` with no
@@ -219,12 +224,22 @@ class Page:
         self._ready_state = "loading"
         self._native.load(html, base_url)
         # M3-5: run the document's own scripts first, in HTML document order
-        # (inline + external interleaved). Inline scripts run their source
-        # directly (resource_name = the document base URL); a `<script src>` is
-        # resolved against base_url and looked up in the host-provided resources
+        # (inline + external interleaved). A `<script src>` is resolved against
+        # base_url and looked up in the host-provided resources
         # (resource_name = the resolved URL). A missing resource fails loudly (no
         # silent skip) via the existing JSError path, with no rollback.
+        # M3-11: an inline `<script>` gets a deterministic resource_name
+        # "{base_url}#inline-script-{n}" where n is its 1-based document-order
+        # position among inline <script> nodes (external <script src> and host
+        # scripts=[...] are NOT counted; a non-executable inline script still
+        # occupies its number). n is a document-structure property, so it is
+        # stable regardless of which scripts actually execute or fail.
+        inline_index = 0
         for index, entry in enumerate(self._native.html_scripts()):
+            src = entry["src"]
+            if src is None:
+                # Count every inline <script>, executable or not (M3-11 numbering).
+                inline_index += 1
             # M3-10: only minimal classic scripts execute. A non-classic <script>
             # (type=module / importmap / application/json / text/plain / any other
             # non-empty type) stays in the DOM and document.scripts but does not
@@ -232,9 +247,9 @@ class Page:
             # missing resource, and never sets document.currentScript.
             if not entry["executable"]:
                 continue
-            src = entry["src"]
             if src is None:
-                code, name = entry["code"], base_url
+                code = entry["code"]
+                name = f"{base_url}#inline-script-{inline_index}"
             else:
                 url = urljoin(base_url, src)
                 if url not in resource_map:
