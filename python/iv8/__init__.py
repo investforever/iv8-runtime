@@ -132,6 +132,15 @@ order. ``querySelectorAll`` supports the same minimal selector subset as
 is ASCII case-insensitive and accepts ``"*"`` (all elements). No
 ``NodeList`` / ``HTMLCollection`` / ``item`` / ``namedItem`` and no collection or
 wrapper identity guarantee. No new Python API / top-level object / exception.
+M4-A-2 (createElement) adds ``document.createElement(tag)`` — it creates a
+**detached** element host object (``tagName`` uppercased from ``String(tag)``,
+`parentNode`/`childNodes`/`children`/`textContent`/`id`/`className` all empty).
+It is NOT in the document tree, so `querySelectorAll` / `getElementsByTagName` /
+`document.scripts` never see it; the existing minimal element face applies
+(read-only surface + `textContent =` / `setAttribute("id"|"class", …)`). A
+`createElement("script")` is detached only — not executed, not in
+`document.scripts`, no `currentScript`/M3-10/M3-11 effect. No tree insertion
+(`appendChild` etc.), no sibling/ownerDocument face. No new Python API.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

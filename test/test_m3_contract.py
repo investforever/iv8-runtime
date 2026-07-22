@@ -57,8 +57,9 @@ def test_js_document_surface_not_exceeded():
         page.load(html="<html><body><div id='d'></div><script id='s'>0;</script></body></html>",
                   base_url=BASE)
         # (M4-A-1 added document.querySelectorAll / getElementsByTagName / head;
-        # these remain out of scope.)
-        for member in ("getElementsByClassName", "createElement", "write",
+        # M4-A-2 added document.createElement; these remain out of scope.)
+        for member in ("getElementsByClassName", "createElementNS",
+                       "createTextNode", "createComment", "write",
                        "onreadystatechange", "forms", "links", "images"):
             assert page.eval(f"typeof document.{member}") == "undefined"
         # document.scripts is a plain Array — no HTMLCollection extras.

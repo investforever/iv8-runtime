@@ -971,9 +971,11 @@ public:
                 "head", "body",            "currentScript", "scripts"};
     }
     std::vector<std::string> method_names() const override {
-        // M2-6 document methods + M4-A-1 static queries + the M3-3 event methods.
+        // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
+        // the M3-3 event methods.
         std::vector<std::string> names = {"getElementById", "querySelector",
-                                          "querySelectorAll", "getElementsByTagName"};
+                                          "querySelectorAll", "getElementsByTagName",
+                                          "createElement"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1050,6 +1052,13 @@ public:
         }
         if (name == "getElementsByTagName") {  // M4-A-1
             return elements_array(isolate, context, elements_by_tag(arg));
+        }
+        if (name == "createElement") {  // M4-A-2: detached element (not in the tree)
+            auto node = std::make_unique<DomNode>();
+            node->tag = ascii_lower(arg);  // arg == String(tag); tagName is UPPER
+            DomNode* raw = node.get();
+            detached_pool_.push_back(std::move(node));
+            return wrap_element(isolate, context, raw);
         }
         return v8::Undefined(isolate);
     }
@@ -1168,6 +1177,10 @@ private:
     DomNode* current_script_ = nullptr;      // M3-7 document.currentScript backing
     std::vector<std::unique_ptr<DomNode>> pool_;
     std::vector<DomNode*> roots_;
+    // M4-A-2: createElement() nodes. Owned here for the page generation (stable,
+    // no dangling) but NEVER linked into roots_/children, so they are detached —
+    // invisible to find_*/collect_* (queries, document.scripts) and to the tree.
+    std::vector<std::unique_ptr<DomNode>> detached_pool_;
     std::vector<ScriptRecord> scripts_;  // M3-5 scripts in document order
     std::vector<std::unique_ptr<ElementHost>> elements_;
     std::unordered_map<DomNode*, ElementHost*> wrappers_;
