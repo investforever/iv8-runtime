@@ -206,14 +206,16 @@ def test_listener_only_fires_for_its_type():
         ) == 0
 
 
-# --- flat model: no bubbling -----------------------------------------------------
+# --- default (non-bubbling) events do not propagate ------------------------------
 
 @on_only
 def test_no_bubbling_between_parent_and_child():
     with iv8.Page() as page:
         _loaded(page)
-        # A listener on the parent is NOT invoked by a dispatch on the child
-        # (this model has no capture/bubble propagation).
+        # A listener on the parent is NOT invoked by a dispatch of a DEFAULT event
+        # on the child: `new Event(type)` has bubbles === false, so it fires only on
+        # the target. (M4-A-7 adds opt-in bubbling for `{bubbles: true}` events; see
+        # test_event_bubbling.py.)
         assert page.eval(
             """
             let n = 0;

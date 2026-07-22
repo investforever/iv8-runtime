@@ -749,6 +749,45 @@ bool is_executable_classic_script(const DomNode* node) {
 
 class DocumentHost;  // ElementHost holds a back-pointer to its document
 
+// --- M4-A-7 minimal bubbling helpers -----------------------------------------
+// Whether `event.bubbles` is truthy (missing -> false).
+bool event_bubbles(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                   v8::Local<v8::Object> event) {
+    v8::Local<v8::Value> value;
+    if (event->Get(context, v8_string(isolate, "bubbles")).ToLocal(&value)) {
+        return value->BooleanValue(isolate);
+    }
+    return false;
+}
+
+// Internal "propagation stopped" flag, stored as a V8 Private on the event so it
+// is invisible to normal property access (not part of the public Event face).
+v8::Local<v8::Private> event_stopped_key(v8::Isolate* isolate) {
+    return v8::Private::ForApi(
+        isolate, v8::String::NewFromUtf8Literal(isolate, "iv8::event-stopped"));
+}
+void reset_event_stopped(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                         v8::Local<v8::Object> event) {
+    (void)event->SetPrivate(context, event_stopped_key(isolate),
+                            v8::False(isolate));
+}
+bool event_is_stopped(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                      v8::Local<v8::Object> event) {
+    v8::Local<v8::Value> value;
+    if (event->GetPrivate(context, event_stopped_key(isolate)).ToLocal(&value)) {
+        return value->BooleanValue(isolate);
+    }
+    return false;
+}
+// event.stopPropagation(): set the private flag on the receiver event. Stops
+// propagation to LATER targets only (no stopImmediatePropagation).
+void stop_propagation_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    (void)info.This()->SetPrivate(context, event_stopped_key(isolate),
+                                  v8::True(isolate));
+}
+
 // --- M3-3 minimal event model ------------------------------------------------
 // EventTargetHost is a mixin for host objects that support events (document,
 // element). It stores JS listener functions per event type as isolate-safe
@@ -756,13 +795,16 @@ class DocumentHost;  // ElementHost holds a back-pointer to its document
 // dispatchEvent.
 //
 // This is deliberately NOT the DOM Events spec: a single flat listener list per
-// type, fired in registration order ON THE TARGET ITSELF. No capture/bubble
-// phases, no preventDefault/stopPropagation, no listener options (once/capture/
-// passive), no default actions, and no lifecycle events (DOMContentLoaded/load).
-// Listeners are JS functions only — there is no JS->Python callback bridge in
-// this phase. The retained Global handles are released via release_v8_handles()
-// before the owning context's isolate is disposed (PageState wires this into
-// ContextState's teardown hook).
+// type, fired in registration order. Each target fires via fire_at (snapshot,
+// swallow exceptions, `this` = the target). M4-A-7 adds minimal BUBBLING over the
+// current tree (element -> ancestors -> document -> window) for events with
+// bubbles === true, plus stopPropagation() (skips later targets only). Still NO
+// capture phase, no preventDefault / stopImmediatePropagation / defaultPrevented,
+// no listener options (once/capture/passive), and no default actions. Listeners
+// are JS functions only — there is no JS->Python callback bridge in this phase.
+// The retained Global handles are released via release_v8_handles() before the
+// owning context's isolate is disposed (PageState wires this into ContextState's
+// teardown hook).
 class EventTargetHost : public HostObject {
 public:
     // Reset every retained listener handle. Runs (via PageState's teardown hook)
@@ -801,12 +843,67 @@ public:
         if (name == "dispatchEvent") {
             // A non-object event dispatches to nothing (returns true).
             if (args.Length() >= 1 && args[0]->IsObject()) {
-                fire(isolate, context, args[0].As<v8::Object>(), args.This());
+                dispatch_event(isolate, context, args[0].As<v8::Object>(),
+                               args.This());
             }
             out = v8::Boolean::New(isolate, true);
             return true;
         }
         return false;
+    }
+
+    // M4-A-7: dispatch `event` starting at this target (`receiver` is the JS
+    // object dispatchEvent was called on). The base does a single-target dispatch
+    // (window uses this); ElementHost / DocumentHost override to bubble along the
+    // current tree. Sets event.target once, resets the stop flag, then fires this
+    // target. Always synchronous; dispatchEvent's JS return stays true.
+    virtual void dispatch_event(v8::Isolate* isolate,
+                                v8::Local<v8::Context> context,
+                                v8::Local<v8::Object> event,
+                                v8::Local<v8::Object> receiver) {
+        (void)event->Set(context, v8_string(isolate, "target"), receiver);
+        reset_event_stopped(isolate, context, event);
+        fire_at(isolate, context, event, receiver);
+    }
+
+    // Fire this target's listeners for the event's type: set event.currentTarget
+    // to `receiver`, snapshot this target's listeners, call each (this = receiver,
+    // arg = event); a throwing listener is swallowed. Does NOT set event.target
+    // (the dispatch entry sets it once, so it stays the original target while
+    // currentTarget changes per hop). Public so bubbling fires across targets.
+    void fire_at(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                 v8::Local<v8::Object> event, v8::Local<v8::Value> receiver) {
+        (void)event->Set(context, v8_string(isolate, "currentTarget"), receiver);
+
+        std::string type;
+        v8::Local<v8::Value> type_value;
+        if (event->Get(context, v8_string(isolate, "type")).ToLocal(&type_value)) {
+            v8::Local<v8::String> str;
+            if (type_value->ToString(context).ToLocal(&str)) {
+                v8::String::Utf8Value utf8(isolate, str);
+                if (*utf8 != nullptr) {
+                    type.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+                }
+            }
+        }
+
+        auto it = listeners_.find(type);
+        if (it == listeners_.end()) {
+            return;
+        }
+        std::vector<v8::Local<v8::Function>> snapshot;
+        snapshot.reserve(it->second.size());
+        for (v8::Global<v8::Function>& fn : it->second) {
+            snapshot.push_back(fn.Get(isolate));
+        }
+        v8::Local<v8::Value> event_arg = event;
+        for (v8::Local<v8::Function>& fn : snapshot) {
+            v8::TryCatch try_catch(isolate);
+            (void)fn->Call(context, receiver, 1, &event_arg);
+            if (try_catch.HasCaught()) {
+                try_catch.Reset();  // one listener's error never stops the rest
+            }
+        }
     }
 
     // M3-4: dispatch a lifecycle event of `type` to this target's listeners from
@@ -819,7 +916,10 @@ public:
         v8::Local<v8::Object> event = v8::Object::New(isolate);
         (void)event->Set(context, v8_string(isolate, "type"),
                          v8_string(isolate, type));
-        fire(isolate, context, event, receiver);
+        // Single-target C++ dispatch (lifecycle): set target once, fire this
+        // target only. Does not bubble (the synthetic event has no `bubbles`).
+        (void)event->Set(context, v8_string(isolate, "target"), receiver);
+        fire_at(isolate, context, event, receiver);
     }
 
 protected:
@@ -889,49 +989,6 @@ private:
                 entry->Reset();
                 bucket.erase(entry);
                 return;  // remove only the first exact match
-            }
-        }
-    }
-
-    // Shared dispatch core (used by both the JS dispatchEvent path and the M3-4
-    // C++ dispatch_native): set target/currentTarget to `receiver`, read the
-    // event's type, and fire every listener registered for that type on this
-    // target, in registration order, with `this` = receiver and the event as the
-    // single argument. Snapshots the listener list so add/removeEventListener
-    // called by a listener does not change THIS dispatch; a throwing listener is
-    // swallowed so the rest still run. No capture/bubble, no cancellation.
-    void fire(v8::Isolate* isolate, v8::Local<v8::Context> context,
-              v8::Local<v8::Object> event, v8::Local<v8::Value> receiver) {
-        (void)event->Set(context, v8_string(isolate, "target"), receiver);
-        (void)event->Set(context, v8_string(isolate, "currentTarget"), receiver);
-
-        std::string type;
-        v8::Local<v8::Value> type_value;
-        if (event->Get(context, v8_string(isolate, "type")).ToLocal(&type_value)) {
-            v8::Local<v8::String> str;
-            if (type_value->ToString(context).ToLocal(&str)) {
-                v8::String::Utf8Value utf8(isolate, str);
-                if (*utf8 != nullptr) {
-                    type.assign(*utf8, static_cast<std::size_t>(utf8.length()));
-                }
-            }
-        }
-
-        auto it = listeners_.find(type);
-        if (it == listeners_.end()) {
-            return;
-        }
-        std::vector<v8::Local<v8::Function>> snapshot;
-        snapshot.reserve(it->second.size());
-        for (v8::Global<v8::Function>& fn : it->second) {
-            snapshot.push_back(fn.Get(isolate));
-        }
-        v8::Local<v8::Value> event_arg = event;
-        for (v8::Local<v8::Function>& fn : snapshot) {
-            v8::TryCatch try_catch(isolate);
-            (void)fn->Call(context, receiver, 1, &event_arg);
-            if (try_catch.HasCaught()) {
-                try_catch.Reset();  // one listener's error never stops the rest
             }
         }
     }
@@ -1012,6 +1069,12 @@ public:
         v8::Isolate* isolate, v8::Local<v8::Context> context,
         const std::string& name,
         const v8::FunctionCallbackInfo<v8::Value>& args) override;
+
+    // M4-A-7: bubble a dispatched event along the current tree (defined out-of-line
+    // below DocumentHost, which owns the bubbling walk).
+    void dispatch_event(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                        v8::Local<v8::Object> event,
+                        v8::Local<v8::Object> receiver) override;
 
 private:
     // M4-A-3: recover the backing DomNode* from a JS element-host argument, or
@@ -1204,7 +1267,100 @@ public:
         return false;
     }
 
+    // M4-A-7: remember window's event target so element/document bubbling can
+    // reach it as the final hop. Set once at install time.
+    void set_window_target(EventTargetHost* window_target) {
+        window_target_ = window_target;
+    }
+
+    // M4-A-7: dispatch `event` from an element and bubble it along the CURRENT
+    // tree. `node` is the element's backing node, `element_host` its host (whose
+    // listeners fire first), `receiver` its JS object (the fixed event.target).
+    // Path: element -> ancestor elements (via parentNode) -> document -> window.
+    // Bubbling past the element only happens when event.bubbles === true; the
+    // document/window hops happen only when the element is connected to the tree
+    // (a detached subtree bubbles internally but never escapes to document/window).
+    // stopPropagation() blocks only LATER hops (checked between hops); the current
+    // target always finishes its own listeners.
+    void run_element_bubbling(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                              v8::Local<v8::Object> event, DomNode* node,
+                              EventTargetHost* element_host,
+                              v8::Local<v8::Object> receiver) {
+        (void)event->Set(context, v8_string(isolate, "target"), receiver);
+        reset_event_stopped(isolate, context, event);
+        element_host->fire_at(isolate, context, event, receiver);
+
+        if (!event_bubbles(isolate, context, event)) {
+            return;
+        }
+        for (DomNode* ancestor = node->parent; ancestor != nullptr;
+             ancestor = ancestor->parent) {
+            if (event_is_stopped(isolate, context, event)) {
+                return;
+            }
+            fire_element_hop(isolate, context, event, ancestor);
+        }
+        if (event_is_stopped(isolate, context, event)) {
+            return;
+        }
+        // Escape to document + window only for a connected element.
+        if (!is_in_tree(node)) {
+            return;
+        }
+        fire_at(isolate, context, event, document_global(isolate, context));
+        if (event_is_stopped(isolate, context, event) || window_target_ == nullptr) {
+            return;
+        }
+        window_target_->fire_at(isolate, context, event, context->Global());
+    }
+
+    // M4-A-7: dispatchEvent called on `document` directly — fire document, then
+    // window if the event bubbles and was not stopped. No tree walk (document is
+    // always "connected"); window is always the last hop.
+    void dispatch_event(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                        v8::Local<v8::Object> event,
+                        v8::Local<v8::Object> receiver) override {
+        (void)event->Set(context, v8_string(isolate, "target"), receiver);
+        reset_event_stopped(isolate, context, event);
+        fire_at(isolate, context, event, receiver);
+        if (!event_bubbles(isolate, context, event) ||
+            event_is_stopped(isolate, context, event) || window_target_ == nullptr) {
+            return;
+        }
+        window_target_->fire_at(isolate, context, event, context->Global());
+    }
+
 private:
+    // Fire one element node's listeners as a single bubbling hop: wrap the node
+    // (caching its host + JS object) and run its listeners with itself as
+    // currentTarget. A node with no wrapper/listeners is a no-op.
+    void fire_element_hop(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                          v8::Local<v8::Object> event, DomNode* node) {
+        v8::Local<v8::Value> js = wrap_element(isolate, context, node);
+        if (!js->IsObject()) {
+            return;
+        }
+        const auto it = wrappers_.find(node);
+        if (it == wrappers_.end()) {
+            return;
+        }
+        it->second->fire_at(isolate, context, event, js.As<v8::Object>());
+    }
+
+    // The global `document` object (event.currentTarget for the document hop), or
+    // the global object as a harmless fallback if it cannot be read.
+    v8::Local<v8::Value> document_global(v8::Isolate* isolate,
+                                         v8::Local<v8::Context> context) {
+        v8::Local<v8::Value> doc;
+        if (context->Global()
+                ->Get(context, v8_string(isolate, "document"))
+                .ToLocal(&doc) &&
+            doc->IsObject()) {
+            return doc;
+        }
+        return context->Global();
+    }
+
     DomNode* find_tag(const std::string& tag) const {
         return find_first(roots_,
                           [&](const DomNode* n) { return n->tag == tag; });
@@ -1259,6 +1415,9 @@ private:
     std::vector<ScriptRecord> scripts_;  // M3-5 scripts in document order
     std::vector<std::unique_ptr<ElementHost>> elements_;
     std::unordered_map<DomNode*, ElementHost*> wrappers_;
+    // M4-A-7: window's event target (final bubbling hop). Observed, not owned;
+    // set at install time. Null before install / in the both-modes shell.
+    EventTargetHost* window_target_ = nullptr;
 };
 
 v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
@@ -1511,6 +1670,17 @@ v8::Local<v8::Value> ElementHost::call_method(
     return v8::Undefined(isolate);
 }
 
+// M4-A-7: an element's dispatchEvent bubbles along the current tree. The owning
+// document runs the walk (element -> ancestors -> document -> window), because it
+// owns the element wrappers, is_in_tree, and the window target. `receiver` is this
+// element's JS object and stays event.target throughout.
+void ElementHost::dispatch_event(v8::Isolate* isolate,
+                                 v8::Local<v8::Context> context,
+                                 v8::Local<v8::Object> event,
+                                 v8::Local<v8::Object> receiver) {
+    document_->run_element_bubbling(isolate, context, event, node_, this, receiver);
+}
+
 // --- M2-4 timers: JS-visible setTimeout/clearTimeout/setInterval/clearInterval.
 // These are bare global functions (not a host object). Each recovers the owning
 // ContextState from the isolate embedder-data slot and delegates to its timer
@@ -1567,11 +1737,13 @@ void install_global_function(v8::Isolate* isolate, v8::Local<v8::Context> contex
     (void)global->Set(context, v8_string(isolate, name), fn);
 }
 
-// M3-3 minimal Event constructor. `new Event(type)` yields a plain JS object with
-// `type` (string, coerced from the first argument) plus `target` and
-// `currentTarget` (null until a dispatch sets them). Intended to be used with
-// `new`. This is a minimal value object only — no bubbles/cancelable/
-// defaultPrevented/timeStamp fields and no stopPropagation/preventDefault methods.
+// M3-3 / M4-A-7 minimal Event constructor. `new Event(type, init?)` yields a plain
+// JS object with `type` (string, coerced from the first argument), `bubbles`
+// (boolean, from `init.bubbles`: truthy -> true; a missing / non-object init ->
+// false), `target` / `currentTarget` (null until a dispatch sets them), and a
+// `stopPropagation()` method. Intended to be used with `new`. Still no cancelable /
+// defaultPrevented / eventPhase / composed / timeStamp fields and no
+// preventDefault / stopImmediatePropagation / CustomEvent.
 void event_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
     v8::Isolate* isolate = info.GetIsolate();
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
@@ -1586,10 +1758,30 @@ void event_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
             }
         }
     }
+    // M4-A-7: bubbles from init.bubbles (only when init is an object).
+    bool bubbles = false;
+    if (info.Length() > 1 && info[1]->IsObject()) {
+        v8::Local<v8::Value> value;
+        if (info[1].As<v8::Object>()
+                ->Get(context, v8_string(isolate, "bubbles"))
+                .ToLocal(&value)) {
+            bubbles = value->BooleanValue(isolate);
+        }
+    }
     (void)self->Set(context, v8_string(isolate, "type"), v8_string(isolate, type));
+    (void)self->Set(context, v8_string(isolate, "bubbles"),
+                    v8::Boolean::New(isolate, bubbles));
     (void)self->Set(context, v8_string(isolate, "target"), v8::Null(isolate));
     (void)self->Set(context, v8_string(isolate, "currentTarget"),
                     v8::Null(isolate));
+    // M4-A-7: stopPropagation() — marks the event so bubbling skips LATER targets
+    // (the current target still finishes its own listeners). No-arg, returns
+    // undefined; no stopImmediatePropagation.
+    v8::Local<v8::Function> stop_fn =
+        v8::FunctionTemplate::New(isolate, &stop_propagation_callback)
+            ->GetFunction(context)
+            .ToLocalChecked();
+    (void)self->Set(context, v8_string(isolate, "stopPropagation"), stop_fn);
 }
 
 // Tag for the External carrying the WindowEventTarget* in the window event
@@ -1667,6 +1859,10 @@ void PageState::install_page(const std::string& base_url,
     // M3-4 window event target: NOT installed as a named global (window stays the
     // intrinsic global object); it only backs window's listener store.
     window_events_ = std::make_unique<WindowEventTarget>();
+    // M4-A-7: give the document the window target so element/document bubbling can
+    // reach window as the final hop. document_host_ is the DocumentHost just added.
+    static_cast<DocumentHost*>(document_host_)
+        ->set_window_target(static_cast<EventTargetHost*>(window_events_.get()));
 
     // Install the host objects and the browser-like global roots into the
     // context. window / self are aliases of the global object; globalThis is the

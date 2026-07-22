@@ -193,6 +193,24 @@ the subtree becomes ``false``); an inserted ``<script>`` reports
 ``compareDocumentPosition`` / ``getRootNode``. No new Python API / top-level
 object / exception.
 
+M4-A-7 (minimal event bubbling) extends ``new Event(type, init?)`` to read
+``init.bubbles`` (truthy → ``true``; a missing / non-object ``init`` → ``false``)
+and adds ``event.bubbles`` plus an ``event.stopPropagation()`` method. When
+``event.bubbles === true``, ``element.dispatchEvent(event)`` now bubbles along the
+CURRENT tree: element → ancestor elements (via ``parentNode``) → ``document`` →
+``window``; ``document.dispatchEvent`` bubbles to ``window``; ``window`` fires only
+itself. A detached subtree bubbles internally but never escapes to
+``document`` / ``window`` (consistent with M4-A-6 ``isConnected``).
+``stopPropagation()`` blocks only LATER targets — the current target still
+finishes its own listeners (no ``stopImmediatePropagation``). ``event.target``
+stays the original target; ``currentTarget`` updates per hop; each target snapshots
+its listeners; a throwing listener is swallowed; ``dispatchEvent`` returns
+``true``. A ``<script>`` participates as an event target but a dispatch never
+executes it. Auto-dispatched lifecycle events (M3-4 / M3-6) are single-target and
+unchanged. No ``cancelable`` / ``defaultPrevented`` / ``preventDefault`` /
+``eventPhase`` / ``composed`` / ``timeStamp`` / ``CustomEvent``, no capture phase,
+no Python event API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
