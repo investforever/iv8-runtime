@@ -179,6 +179,19 @@ detached subtrees reflected). Document-level queries are unchanged; on a given
 subtree they agree. A ``<script>`` in a subtree is queryable but stays inert. No
 ``matches`` / ``closest`` / ``getElementsByClassName`` / attribute selectors. No
 new Python API / top-level object / exception.
+M4-A-6 (connectivity / sibling navigation) adds four read-only element properties:
+``ownerDocument`` (the current generation's ``document`` — same object, so
+``el.ownerDocument === document``), ``isConnected`` (``true`` iff the element's
+topmost ancestor is a document root, i.e. reachable in the tree; ``false`` for a
+detached element or a removed subtree), and ``previousElementSibling`` /
+``nextElementSibling`` (the adjacent element in the parent's children order, or
+``null`` at an end / with no parent). All are based on the live tree, so M4-A-3
+edits are reflected at once (attach → ``isConnected`` becomes ``true``; remove →
+the subtree becomes ``false``); an inserted ``<script>`` reports
+``isConnected === true`` but stays inert. No ``parentElement`` / raw
+``previousSibling`` / ``nextSibling`` / ``firstElementChild`` / ``contains`` /
+``compareDocumentPosition`` / ``getRootNode``. No new Python API / top-level
+object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

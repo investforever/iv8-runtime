@@ -331,8 +331,9 @@ def test_no_out_of_scope_tree_surface():
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         assert page.eval("typeof document.appendChild") == "undefined"
+        # (M4-A-6 added ownerDocument/isConnected/previous|nextElementSibling;
+        # raw previousSibling/nextSibling stay out of scope.)
         el = "document.getElementById('d')"
         for member in ("replaceChild", "append", "prepend", "before", "after",
-                       "remove", "previousSibling", "nextSibling", "ownerDocument",
-                       "isConnected", "cloneNode"):
+                       "remove", "previousSibling", "nextSibling", "cloneNode"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"

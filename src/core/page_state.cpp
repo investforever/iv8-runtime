@@ -978,8 +978,12 @@ public:
     std::string global_name() const override { return std::string(); }  // never global
     bool is_element() const override { return true; }  // M4-A-3 arg identification
     std::vector<std::string> property_names() const override {
-        return {"tagName",     "nodeName",   "nodeType", "id",     "className",
-                "textContent", "parentNode", "childNodes", "children"};
+        return {"tagName",     "nodeName",   "nodeType",   "id",
+                "className",   "textContent", "parentNode", "childNodes",
+                "children",
+                // M4-A-6 connectivity / element-sibling navigation.
+                "ownerDocument", "isConnected", "previousElementSibling",
+                "nextElementSibling"};
     }
     std::vector<std::string> method_names() const override {
         // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing +
@@ -1184,6 +1188,22 @@ public:
         return array;
     }
 
+    // M4-A-6: whether `node` is connected to this document's tree — i.e. its
+    // topmost ancestor (following parent) is one of roots_. Detached nodes (and
+    // whole removed subtrees) are not. Public for ElementHost.isConnected.
+    bool is_in_tree(const DomNode* node) const {
+        const DomNode* top = node;
+        while (top->parent != nullptr) {
+            top = top->parent;
+        }
+        for (const DomNode* root : roots_) {
+            if (root == top) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 private:
     DomNode* find_tag(const std::string& tag) const {
         return find_first(roots_,
@@ -1267,6 +1287,43 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
                 document_->wrap_element(isolate, context, node_->children[k]));
         }
         return array;
+    }
+    // M4-A-6 connectivity / element-sibling navigation (based on the live tree).
+    if (name == "ownerDocument") {
+        // The current generation's `document` — the SAME JS object installed as
+        // the global, so `el.ownerDocument === document` holds.
+        v8::Local<v8::Value> doc;
+        if (context->Global()
+                ->Get(context, v8_string(isolate, "document"))
+                .ToLocal(&doc)) {
+            return doc;
+        }
+        return v8::Null(isolate);
+    }
+    if (name == "isConnected") {
+        return v8::Boolean::New(isolate, document_->is_in_tree(node_));
+    }
+    if (name == "previousElementSibling" || name == "nextElementSibling") {
+        DomNode* parent = node_->parent;
+        if (parent == nullptr) {
+            return v8::Null(isolate);  // no parent -> no siblings
+        }
+        const std::vector<DomNode*>& kids = parent->children;
+        const auto it = std::find(kids.begin(), kids.end(), node_);
+        if (it == kids.end()) {
+            return v8::Null(isolate);
+        }
+        if (name == "previousElementSibling") {
+            if (it == kids.begin()) {
+                return v8::Null(isolate);
+            }
+            return document_->wrap_element(isolate, context, *(it - 1));
+        }
+        const auto next = it + 1;
+        if (next == kids.end()) {
+            return v8::Null(isolate);
+        }
+        return document_->wrap_element(isolate, context, *next);
     }
     return v8::Undefined(isolate);
 }
