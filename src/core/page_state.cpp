@@ -1115,6 +1115,13 @@ void event_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
                     v8::Null(isolate));
 }
 
+// Tag for the External carrying the WindowEventTarget* in the window event
+// functions' Data. V8 15.0 requires an ExternalPointerTypeTag on External::New /
+// External::Value; the default suffices for this single pointer type and MUST
+// match between New (install_page) and Value (below).
+constexpr v8::ExternalPointerTypeTag kWindowEventsTag =
+    v8::kExternalPointerTypeTagDefault;
+
 // M3-4 window event target functions. window is the intrinsic global object (not
 // a host object), so its addEventListener / removeEventListener / dispatchEvent
 // are installed as bare global functions whose FunctionTemplate Data is an
@@ -1126,8 +1133,8 @@ void window_event_method(const v8::FunctionCallbackInfo<v8::Value>& info,
                          const char* method_name) {
     v8::Isolate* isolate = info.GetIsolate();
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    auto* target =
-        static_cast<EventTargetHost*>(info.Data().As<v8::External>()->Value());
+    auto* target = static_cast<EventTargetHost*>(
+        info.Data().As<v8::External>()->Value(kWindowEventsTag));
     v8::Local<v8::Value> out;
     if (target->handle_event_method(isolate, context, method_name, info, out)) {
         info.GetReturnValue().Set(out);
@@ -1223,7 +1230,8 @@ void PageState::install_page(const std::string& base_url,
             // data points at window_events_ (created above). They therefore share
             // EventTargetHost's exact semantics with document/element.
             v8::Local<v8::External> window_data = v8::External::New(
-                isolate, static_cast<EventTargetHost*>(window_events_.get()));
+                isolate, static_cast<EventTargetHost*>(window_events_.get()),
+                kWindowEventsTag);
             auto install_window_event_fn = [&](const char* name,
                                                v8::FunctionCallback callback) {
                 v8::Local<v8::Function> fn =
