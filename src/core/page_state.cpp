@@ -655,6 +655,30 @@ void collect_matching(DomNode* node,
     }
 }
 
+// M4-A-3: unlink `child` from its current parent's children (if any) and clear
+// its parent pointer. `child`'s own subtree is untouched.
+void detach_from_parent(DomNode* child) {
+    DomNode* parent = child->parent;
+    if (parent == nullptr) {
+        return;
+    }
+    std::vector<DomNode*>& siblings = parent->children;
+    siblings.erase(std::remove(siblings.begin(), siblings.end(), child),
+                   siblings.end());
+    child->parent = nullptr;
+}
+
+// M4-A-3: true if `candidate` is `of` itself or an ancestor of `of`. Used to
+// reject inserting a node into its own subtree (would create a cycle).
+bool is_self_or_ancestor(const DomNode* candidate, const DomNode* of) {
+    for (const DomNode* node = of; node != nullptr; node = node->parent) {
+        if (node == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // M3-10: whether a <script> is a minimal *classic* (executable) script, by its
 // raw `type` attribute. Executable iff: no type attribute, type is empty or only
 // ASCII whitespace, or type (trimmed, ASCII-lowercased) is exactly
@@ -907,14 +931,16 @@ public:
         : node_(node), document_(document) {}
 
     std::string global_name() const override { return std::string(); }  // never global
+    bool is_element() const override { return true; }  // M4-A-3 arg identification
     std::vector<std::string> property_names() const override {
         return {"tagName",     "nodeName",   "nodeType", "id",     "className",
                 "textContent", "parentNode", "childNodes", "children"};
     }
     std::vector<std::string> method_names() const override {
-        // M2-7/M2-8 element methods + the M3-3 event-target methods.
-        std::vector<std::string> names = {"getAttribute", "hasAttribute",
-                                          "setAttribute"};
+        // M2-7/M2-8 element methods + M4-A-3 tree editing + the M3-3 event methods.
+        std::vector<std::string> names = {"getAttribute",  "hasAttribute",
+                                          "setAttribute",  "appendChild",
+                                          "removeChild",   "insertBefore"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -936,6 +962,19 @@ public:
         const v8::FunctionCallbackInfo<v8::Value>& args) override;
 
 private:
+    // M4-A-3: recover the backing DomNode* from a JS element-host argument, or
+    // nullptr if it is not an element host object (a non-element host object such
+    // as document, a plain JS value, etc.). Uses is_element() (no RTTI); the
+    // static_cast is safe because only ElementHost returns is_element()==true.
+    // Same-class access reads node_.
+    DomNode* node_of_arg(v8::Local<v8::Value> value) {
+        HostObject* host = host_object_backing(value);
+        if (host == nullptr || !host->is_element()) {
+            return nullptr;
+        }
+        return static_cast<ElementHost*>(host)->node_;
+    }
+
     DomNode* node_;            // owned by document_ (lives for the page generation)
     DocumentHost* document_;
 };
@@ -1296,6 +1335,65 @@ v8::Local<v8::Value> ElementHost::call_method(
             node_->classes = split_class_tokens(val);
         }
         return v8::Undefined(isolate);
+    }
+    // M4-A-3 minimal tree editing. child/ref must be element host objects (ref may
+    // be null for insertBefore). Errors throw a JS TypeError (via the eval
+    // TryCatch this surfaces as iv8.JSError name "TypeError"). Mutations touch the
+    // live DomNode parent/children, so document-level queries reflect them at once.
+    // NOTE: textContent is NOT recomputed here — it stays the M2-7 stored aggregate
+    // (this minimal tree has no text nodes; see docs/m4_a_3_tree_editing.md).
+    const auto throw_type_error = [&](const char* message) -> v8::Local<v8::Value> {
+        isolate->ThrowException(v8::Exception::TypeError(v8_string(isolate, message)
+                                                            .As<v8::String>()));
+        return v8::Undefined(isolate);
+    };
+    if (name == "appendChild" || name == "removeChild" ||
+        name == "insertBefore") {
+        DomNode* child = node_of_arg(args.Length() > 0 ? args[0]
+                                                       : v8::Local<v8::Value>());
+        if (child == nullptr) {
+            return throw_type_error("argument is not an element");
+        }
+        if (name == "removeChild") {
+            if (child->parent != node_) {
+                return throw_type_error("removeChild: not a child of this node");
+            }
+            detach_from_parent(child);
+            return args[0];
+        }
+        // appendChild / insertBefore: resolve ref (insertBefore only; null = end).
+        DomNode* ref = nullptr;
+        if (name == "insertBefore") {
+            const bool ref_is_null =
+                args.Length() > 1 && (args[1]->IsNull() || args[1]->IsUndefined());
+            if (!ref_is_null) {
+                ref = node_of_arg(args.Length() > 1 ? args[1]
+                                                    : v8::Local<v8::Value>());
+                if (ref == nullptr) {
+                    return throw_type_error("insertBefore: ref is not an element");
+                }
+                if (ref->parent != node_) {
+                    return throw_type_error(
+                        "insertBefore: ref is not a child of this node");
+                }
+                if (child == ref) {
+                    return args[0];  // stable no-op
+                }
+            }
+        }
+        if (is_self_or_ancestor(child, node_)) {
+            return throw_type_error("cannot insert a node into its own subtree");
+        }
+        detach_from_parent(child);
+        child->parent = node_;
+        if (ref == nullptr) {
+            node_->children.push_back(child);  // append
+        } else {
+            const auto pos =
+                std::find(node_->children.begin(), node_->children.end(), ref);
+            node_->children.insert(pos, child);
+        }
+        return args[0];
     }
     return v8::Undefined(isolate);
 }

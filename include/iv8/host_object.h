@@ -63,6 +63,12 @@ public:
     // so PageState invokes it via ContextState's teardown hook, before the
     // context/isolate are torn down. Must be noexcept (teardown never throws).
     virtual void release_v8_handles() noexcept {}
+
+    // M4-A-3: whether this host is an element host object. Lets a host method that
+    // receives another host object as an argument (tree editing) identify element
+    // arguments without RTTI/dynamic_cast (which V8-linked builds may compile with
+    // -fno-rtti). Default false; ElementHost overrides to true.
+    virtual bool is_element() const { return false; }
 };
 
 // Build (WITHOUT installing) a JS object backed by `host`: an ObjectTemplate with
@@ -78,5 +84,11 @@ v8::Local<v8::Object> make_host_object(v8::Isolate* isolate,
 // global property named host->global_name() on `context`.
 void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
                          HostObject* host);
+
+// Recover the native HostObject* backing a host-object-backed JS value (one built
+// by make_host_object), or nullptr if `value` is not such an object. Used when a
+// host method receives another host object as an argument (e.g. M4-A-3 tree
+// editing takes an element argument). Must run inside the isolate scope.
+HostObject* host_object_backing(v8::Local<v8::Value> value);
 
 }  // namespace iv8

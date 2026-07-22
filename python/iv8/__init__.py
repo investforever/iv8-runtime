@@ -139,8 +139,22 @@ It is NOT in the document tree, so `querySelectorAll` / `getElementsByTagName` /
 `document.scripts` never see it; the existing minimal element face applies
 (read-only surface + `textContent =` / `setAttribute("id"|"class", …)`). A
 `createElement("script")` is detached only — not executed, not in
-`document.scripts`, no `currentScript`/M3-10/M3-11 effect. No tree insertion
-(`appendChild` etc.), no sibling/ownerDocument face. No new Python API.
+`document.scripts`, no `currentScript`/M3-10/M3-11 effect. No new Python API.
+M4-A-3 (minimal tree editing) adds three JS-side ELEMENT methods —
+``element.appendChild(child)``, ``element.removeChild(child)``,
+``element.insertBefore(child, ref)`` — operating on the live minimal tree
+(element children only; ``ref`` may be ``null`` = append). They move / attach /
+detach element nodes so document-level queries (``getElementById`` /
+``querySelector[All]`` / ``getElementsByTagName`` / ``document.scripts``) reflect
+the change immediately; a detached ``createElement`` node becomes queryable once
+attached and detached again once removed. A ``<script>`` inserted into the tree
+appears in ``document.scripts`` but is still NOT executed (no ``currentScript`` /
+M3-10 / M3-11). Invalid operations (a non-element arg; ``removeChild`` /
+``insertBefore`` with a non-child; inserting a node into its own subtree) throw a
+JS ``TypeError``. ``textContent`` stays the M2-7 stored aggregate (not recomputed
+on tree edit — this minimal tree has no text nodes). No ``document.appendChild``,
+no ``replaceChild`` / ``append`` / ``prepend`` / sibling / ownerDocument face; no
+new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

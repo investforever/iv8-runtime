@@ -120,4 +120,13 @@ void install_host_object(v8::Isolate* isolate, v8::Local<v8::Context> context,
                                  object);
 }
 
+HostObject* host_object_backing(v8::Local<v8::Value> value) {
+    if (value.IsEmpty() || !value->IsObject()) {
+        return nullptr;
+    }
+    // backing_of() fails safe (nullptr) if the object has no host-object internal
+    // field, so a plain JS object / non-host object returns nullptr.
+    return backing_of(value.As<v8::Object>());
+}
+
 }  // namespace iv8
