@@ -640,6 +640,29 @@ void collect_scripts(DomNode* node, std::vector<DomNode*>& out) {
     }
 }
 
+// M3-10: whether a <script> is a minimal *classic* (executable) script, by its
+// raw `type` attribute. Executable iff: no type attribute, type is empty or only
+// ASCII whitespace, or type (trimmed, ASCII-lowercased) is exactly
+// "text/javascript" or "application/javascript". Everything else (module,
+// importmap, application/json, text/plain, any other non-empty type) is
+// non-executable — it stays in the DOM / document.scripts but does not run.
+bool is_executable_classic_script(const DomNode* node) {
+    const auto it = node->attributes.find("type");
+    if (it == node->attributes.end()) {
+        return true;  // no type attribute -> classic
+    }
+    const std::string& raw = it->second;
+    std::size_t a = 0;
+    std::size_t b = raw.size();
+    while (a < b && std::isspace(static_cast<unsigned char>(raw[a]))) a++;
+    while (b > a && std::isspace(static_cast<unsigned char>(raw[b - 1]))) b--;
+    if (a == b) {
+        return true;  // empty or whitespace-only -> classic
+    }
+    const std::string type = ascii_lower(raw.substr(a, b - a));
+    return type == "text/javascript" || type == "application/javascript";
+}
+
 class DocumentHost;  // ElementHost holds a back-pointer to its document
 
 // --- M3-3 minimal event model ------------------------------------------------
@@ -1464,6 +1487,10 @@ py::list PageState::html_scripts() {
                 entry["src"] = py::none();
             }
             entry["code"] = script.code;
+            // M3-10: only executable classic scripts run; Page.load skips the rest
+            // (they stay in the DOM / document.scripts but never execute).
+            entry["executable"] =
+                script.node == nullptr || is_executable_classic_script(script.node);
             result.append(entry);
         }
     }

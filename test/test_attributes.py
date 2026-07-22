@@ -173,7 +173,11 @@ def test_inline_current_script_reads_data_attr():
 
 @on_only
 def test_external_current_script_reads_raw_src_not_resolved_url():
-    html = "<html><head><script src='app.js' type='module'></script></head></html>"
+    # M3-10: use an executable classic type so the script runs (type='module'
+    # would no longer execute); still exercises raw-src + type reading.
+    html = ("<html><head>"
+            "<script src='app.js' type='text/javascript'></script>"
+            "</head></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE, resources={
             BASE + "app.js": (
@@ -183,7 +187,7 @@ def test_external_current_script_reads_raw_src_not_resolved_url():
         })
         # Raw markup value, NOT the resolved absolute URL (BASE + 'app.js').
         assert page.eval("globalThis.rawSrc") == "app.js"
-        assert page.eval("globalThis.tp") == "module"
+        assert page.eval("globalThis.tp") == "text/javascript"
 
 
 # --- unchanged behaviours --------------------------------------------------------

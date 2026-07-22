@@ -57,10 +57,12 @@ public:
     void dispatch_lifecycle_events();
 
     // M3-5: the scripts parsed from the current document's HTML, in document
-    // order, as a list of {"src": str|None, "code": str} dicts (inline -> src
-    // None + JS in code; `<script src>` -> raw src + empty code). Page.load reads
-    // this after installing the generation to run the HTML scripts. Pure data
-    // read (no V8 access).
+    // order, as a list of {"src": str|None, "code": str, "executable": bool} dicts
+    // (inline -> src None + JS in code; `<script src>` -> raw src + empty code;
+    // M3-10 `executable` = a minimal classic script that Page.load should run —
+    // non-classic types stay in the DOM but are skipped). Page.load reads this
+    // after installing the generation to run the HTML scripts. Pure data read
+    // (no V8 access).
     pybind11::list html_scripts();
 
     // M3-7: run the HTML script at `index` (in html_scripts() order) with

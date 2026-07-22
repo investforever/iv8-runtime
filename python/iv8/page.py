@@ -167,6 +167,13 @@ class Page:
         resolved URL) — no rollback. M3-7: while each HTML script runs,
         ``document.currentScript`` points at that ``<script>`` element (cleared to
         ``null`` after, even on error); the host ``scripts`` below never set it.
+        M3-10: only minimal *classic* scripts execute — a ``<script>`` with no
+        ``type``, an empty/whitespace ``type``, or ``type`` (trimmed, ASCII
+        case-insensitive) ``text/javascript`` / ``application/javascript``. Any
+        other type (``module`` / ``importmap`` / ``application/json`` /
+        ``text/plain`` / …) stays in the DOM and ``document.scripts`` but is NOT
+        run: it is not resolved against ``resources`` (so a missing resource is not
+        an error) and never sets ``document.currentScript``.
 
         M3-1 external scripts (optional): ``scripts`` is a ``list`` of mappings,
         each with string ``name`` and ``code``. They run **after** the HTML
@@ -218,6 +225,13 @@ class Page:
         # (resource_name = the resolved URL). A missing resource fails loudly (no
         # silent skip) via the existing JSError path, with no rollback.
         for index, entry in enumerate(self._native.html_scripts()):
+            # M3-10: only minimal classic scripts execute. A non-classic <script>
+            # (type=module / importmap / application/json / text/plain / any other
+            # non-empty type) stays in the DOM and document.scripts but does not
+            # run — so it is not resolved against resources, never errors on a
+            # missing resource, and never sets document.currentScript.
+            if not entry["executable"]:
+                continue
             src = entry["src"]
             if src is None:
                 code, name = entry["code"], base_url

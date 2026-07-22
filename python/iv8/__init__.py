@@ -105,6 +105,15 @@ mutation that detaches a script subtree is reflected), reuses the M3-8 element
 surface, and makes no live-collection / identity guarantee. JS-side only; no new
 Python API, no ``HTMLCollection`` / ``NodeList`` / ``querySelectorAll`` /
 ``getElementsByTagName``.
+M3-10 (script type executability) narrows HTML ``<script>`` execution to minimal
+*classic* scripts: a ``<script>`` runs only if it has no ``type``, an empty /
+whitespace ``type``, or ``type`` (trimmed, ASCII case-insensitive)
+``text/javascript`` / ``application/javascript``. Any other type (``module`` /
+``importmap`` / ``application/json`` / ``text/plain`` / …) stays in the document
+tree and ``document.scripts`` (attributes still readable) but does NOT execute —
+it is not resolved against ``resources`` and never sets ``document.currentScript``.
+No new Python API; ``resources`` / lifecycle / ``document.scripts`` otherwise
+unchanged.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
