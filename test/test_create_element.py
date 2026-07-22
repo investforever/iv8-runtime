@@ -177,12 +177,12 @@ def test_no_out_of_scope_creation_or_tree_surface():
         page.load(html="<html><body><div id='d'></div></body></html>", base_url=BASE)
         for member in ("createElementNS", "createTextNode", "createComment"):
             assert page.eval(f"typeof document.{member}") == "undefined"
-        # (M4-A-3 adds appendChild/removeChild/insertBefore on elements; still out
-        # of scope here: ownerDocument/isConnected/sibling/element-query/
-        # replaceChild/removeAttribute/innerHTML.)
+        # (M4-A-3 adds appendChild/removeChild/insertBefore; M4-A-4 adds
+        # removeAttribute; still out of scope here: ownerDocument/isConnected/
+        # sibling/element-query/replaceChild/innerHTML.)
         el = "document.createElement('div')"
         for member in ("ownerDocument", "isConnected", "previousSibling",
                        "nextSibling", "querySelector", "querySelectorAll",
-                       "getElementsByTagName", "replaceChild", "removeAttribute",
+                       "getElementsByTagName", "replaceChild",
                        "innerHTML", "outerHTML"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"

@@ -108,11 +108,11 @@ def test_element_has_no_mutation_or_query_surface():
     with iv8.Page() as page:
         _loaded(page)
         assert page.eval("typeof document.body.tagName") == "string"
-        # (M2-8 adds setAttribute; M4-A-3 adds appendChild/removeChild/insertBefore
-        # — these stay out of scope: element-level query, replaceChild, the
-        # append/remove/prepend family, removeAttribute, innerHTML/style.)
+        # (M2-8/M4-A-4 add setAttribute/removeAttribute; M4-A-3 adds appendChild/
+        # removeChild/insertBefore — these stay out of scope: element-level query,
+        # replaceChild, the append/remove/prepend family, innerHTML/style.)
         for absent in ("innerHTML", "outerHTML", "querySelector",
-                       "querySelectorAll", "removeAttribute", "replaceChild",
+                       "querySelectorAll", "replaceChild",
                        "append", "remove", "prepend", "style"):
             assert page.eval(f"document.body.{absent} === undefined") is True
 

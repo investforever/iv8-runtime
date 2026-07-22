@@ -85,14 +85,14 @@ def test_set_attribute_class_updates_query_and_attribute_surface():
 
 
 @on_only
-def test_set_attribute_other_names_are_ignored():
+def test_set_attribute_general_names_writable():
     with iv8.Page() as page:
         _loaded(page)
         el = "document.getElementById('main')"
-        # Only id/class are retained; other attributes are not stored.
+        # M4-A-4: setAttribute now writes ANY attribute (was id/class only in M2-8).
         page.eval(f"{el}.setAttribute('data-x', 'v')")
-        assert page.eval(f"{el}.getAttribute('data-x') === null") is True
-        assert page.eval(f"{el}.hasAttribute('data-x')") is False
+        assert page.eval(f"{el}.getAttribute('data-x')") == "v"
+        assert page.eval(f"{el}.hasAttribute('data-x')") is True
 
 
 @on_only

@@ -73,8 +73,9 @@ def test_js_element_surface_not_exceeded():
     with iv8.Page() as page:
         page.load(html="<html><body><div id='d' data-x='1'></div></body></html>",
                   base_url=BASE)
+        # (M4-A-4 added element.removeAttribute; it stays out of scope here.)
         el = "document.getElementById('d')"
-        for member in ("attributes", "dataset", "removeAttribute",
+        for member in ("attributes", "dataset",
                        "toggleAttribute", "hasAttributes", "src", "type",
                        "async", "defer", "innerHTML", "outerHTML", "style",
                        "classList"):

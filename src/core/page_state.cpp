@@ -937,10 +937,12 @@ public:
                 "textContent", "parentNode", "childNodes", "children"};
     }
     std::vector<std::string> method_names() const override {
-        // M2-7/M2-8 element methods + M4-A-3 tree editing + the M3-3 event methods.
-        std::vector<std::string> names = {"getAttribute",  "hasAttribute",
-                                          "setAttribute",  "appendChild",
-                                          "removeChild",   "insertBefore"};
+        // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing + M3-3
+        // event methods.
+        std::vector<std::string> names = {"getAttribute",    "hasAttribute",
+                                          "setAttribute",    "removeAttribute",
+                                          "appendChild",     "removeChild",
+                                          "insertBefore"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1321,8 +1323,11 @@ v8::Local<v8::Value> ElementHost::call_method(
         }
         return present ? v8_string(isolate, *value) : v8::Null(isolate);
     }
-    // M2-8 setAttribute: only id + class are retained; other names are ignored
-    // (not a full attribute system). Mutations are visible to live queries.
+    // M4-A-4 setAttribute(name, value): write ANY attribute (name lowercased,
+    // value = String(value)). id/class keep their dedicated fields (so .id /
+    // .className / id/class-based queries stay consistent); every other name goes
+    // in the raw attribute table (M3-8). Not a full attribute system (no order/
+    // serialization / reflection).
     if (name == "setAttribute") {
         const std::string key = ascii_lower(arg_string(0));
         const std::string val = arg_string(1);
@@ -1333,6 +1338,25 @@ v8::Local<v8::Value> ElementHost::call_method(
             node_->class_name = val;
             node_->has_class = true;
             node_->classes = split_class_tokens(val);
+        } else {
+            node_->attributes[key] = val;
+        }
+        return v8::Undefined(isolate);
+    }
+    // M4-A-4 removeAttribute(name): remove the attribute if present, else no-op.
+    // id/class clear their dedicated fields (queries update); other names are
+    // erased from the raw attribute table. Returns undefined.
+    if (name == "removeAttribute") {
+        const std::string key = ascii_lower(arg_string(0));
+        if (key == "id") {
+            node_->id.clear();
+            node_->has_id = false;
+        } else if (key == "class") {
+            node_->class_name.clear();
+            node_->has_class = false;
+            node_->classes.clear();
+        } else {
+            node_->attributes.erase(key);
         }
         return v8::Undefined(isolate);
     }

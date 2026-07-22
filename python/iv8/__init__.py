@@ -93,8 +93,8 @@ M3-8 (read-only markup attributes) extends the existing element
 from the HTML markup (case-insensitive name; raw string value; a valueless
 attribute reads ``""``; missing → ``null`` / ``false``; duplicate names last-win),
 so e.g. ``document.currentScript.getAttribute("src")`` returns the raw markup
-``src`` (not the resolved URL). The WRITE side is unchanged: ``setAttribute`` still
-only accepts ``id`` / ``class`` (M2-8), and ``id`` / ``className`` /
+``src`` (not the resolved URL). The WRITE side at M3-8 accepts only ``id`` /
+``class`` (M2-8); this is widened in M4-A-4 below. ``id`` / ``className`` /
 ``getAttribute("id"|"class")`` / ``querySelector`` stay consistent. JS-side only;
 no new Python API, no attributes collection / ``dataset`` / attribute reflection.
 M3-9 (document.scripts) adds a read-only JS-side ``document.scripts``: a plain JS
@@ -155,6 +155,18 @@ JS ``TypeError``. ``textContent`` stays the M2-7 stored aggregate (not recompute
 on tree edit — this minimal tree has no text nodes). No ``document.appendChild``,
 no ``replaceChild`` / ``append`` / ``prepend`` / sibling / ownerDocument face; no
 new Python API / top-level object / exception.
+M4-A-4 (attribute writes) widens ``element.setAttribute(name, value)`` from
+id/class-only (M2-8) to ANY attribute (``name`` lowercased; ``value`` =
+``String(value)``) and adds ``element.removeAttribute(name)``. ``id`` / ``class``
+keep their dedicated fields — set/remove stays consistent with ``.id`` /
+``.className`` and with id/class-based queries (``getElementById`` /
+``querySelector[All]``); every other name lives in the minimal attribute table
+(read by ``getAttribute`` / ``hasAttribute``, M3-8). Name lookup is ASCII
+case-insensitive; ``removeAttribute`` of an absent name is a no-op. A `<script>`
+node's `src`/`type` can be set/removed but this stays inert (no execution / load /
+`currentScript`, M4-A-3). No reflection properties (`.src` / `.type` / `.title` /
+`.hidden` / `.dataset`), no `attributes` / `classList` / `style` /
+`toggleAttribute` / `hasAttributes` / `setAttributeNS`. No new Python API.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

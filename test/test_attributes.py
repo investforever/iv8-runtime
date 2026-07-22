@@ -142,18 +142,18 @@ def test_set_attribute_class_syncs_read_side():
 
 
 @on_only
-def test_set_attribute_non_id_class_is_still_ignored():
+def test_set_attribute_non_id_class_now_writable():
     html = "<html><body><div id='d'></div></body></html>"
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        # Writing a non-id/class attribute must NOT create it (M2-8 boundary kept).
+        # M4-A-4: a non-id/class attribute is now written (was ignored in M2-8).
         assert page.eval(
             """
             const el = document.getElementById('d');
             el.setAttribute('data-x', 'v');
-            [el.getAttribute('data-x') === null, el.hasAttribute('data-x')].join(',');
+            [el.getAttribute('data-x') === 'v', el.hasAttribute('data-x')].join(',');
             """
-        ) == "true,false"
+        ) == "true,true"
 
 
 # --- currentScript can read its own markup attributes ---------------------------
@@ -207,8 +207,8 @@ def test_no_attribute_surface_leak_in_page_eval():
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         # No attributes collection / dataset / attribute reflection was added.
+        # (M4-A-4 added removeAttribute; toggleAttribute stays out of scope.)
         el = "document.getElementById('d')"
         assert page.eval(f"typeof {el}.attributes") == "undefined"
         assert page.eval(f"typeof {el}.dataset") == "undefined"
-        assert page.eval(f"typeof {el}.removeAttribute") == "undefined"
         assert page.eval(f"typeof {el}.toggleAttribute") == "undefined"
