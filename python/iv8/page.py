@@ -19,9 +19,10 @@ The public API shape is identical in both build modes: when V8 is linked,
 """
 
 from collections.abc import Mapping
+from urllib.parse import urljoin
 
 from . import _core
-from .errors import JSContextDisposedError
+from .errors import JSContextDisposedError, JSError
 
 __all__ = ["Page"]
 
@@ -48,6 +49,28 @@ def _normalize_scripts(scripts):
         if not isinstance(code, str):
             raise TypeError(f"scripts[{index}]['code'] must be a str")
         normalized.append((name, code))
+    return normalized
+
+
+def _normalize_resources(resources):
+    """Validate the M3-5 ``resources`` input and return a plain ``dict``.
+
+    ``resources`` must be ``None`` (or omitted) or a mapping from absolute-URL
+    strings to script-source strings. Any type error raises ``TypeError`` before
+    any page state is touched (a bad ``resources`` argument does not reload the
+    page). It is a host-provided lookup only — no network is ever performed.
+    """
+    if resources is None:
+        return {}
+    if not isinstance(resources, Mapping):
+        raise TypeError("resources must be a mapping")
+    normalized = {}
+    for key, value in resources.items():
+        if not isinstance(key, str):
+            raise TypeError("resources keys must be str (absolute URLs)")
+        if not isinstance(value, str):
+            raise TypeError("resources values must be str (script source)")
+        normalized[key] = value
     return normalized
 
 
@@ -124,7 +147,7 @@ class Page:
         """
         self._native.run_jobs()
 
-    def load(self, html: str, base_url: str, scripts=None) -> None:
+    def load(self, html: str, base_url: str, scripts=None, resources=None) -> None:
         """Refresh the page state from static HTML and a base URL.
 
         Replaces the current page state: the JS context is rebuilt (globals reset)
@@ -132,16 +155,27 @@ class Page:
         internal document-bootstrap state. This is NOT a real navigation/loader —
         no network, subresources, or history.
 
+        M3-5 HTML script integration: the document's own scripts are executed
+        first, in **HTML document order** (inline ``<script>...</script>`` and
+        ``<script src="...">`` interleaved). An inline script runs its source
+        directly; a ``<script src>`` is resolved against ``base_url`` and its
+        source is looked up in ``resources`` (a host-provided mapping — NO
+        network). ``resources`` is ``None``/omitted or a mapping of absolute-URL
+        strings to script-source strings; a bad shape raises ``TypeError`` before
+        any load. A ``<script src>`` with no matching ``resources`` entry fails
+        loudly (never silently skipped) via ``JSError`` (``resource_name`` = the
+        resolved URL) — no rollback.
+
         M3-1 external scripts (optional): ``scripts`` is a ``list`` of mappings,
-        each with string ``name`` and ``code``. After the page generation is
-        installed, the scripts are executed **synchronously, in order**, in the
-        newly loaded context (so a later script sees globals defined by earlier
-        ones). Each script's ``name`` is its resource/origin name, so a failure
-        surfaces as ``JSError`` with ``resource_name == name``. There is no
-        rollback: if a script fails the exception propagates and the page keeps
-        whatever earlier scripts already did. Timers/jobs scheduled by scripts do
-        NOT run in the background — only ``run_timers()`` / ``run_jobs()`` execute
-        them. ``scripts=None`` / ``[]`` is exactly the M2 load path.
+        each with string ``name`` and ``code``. They run **after** the HTML
+        document scripts, **synchronously, in list order**, in the same context
+        (so they see globals from the HTML scripts and vice-versa). Each script's
+        ``name`` is its resource/origin name, so a failure surfaces as ``JSError``
+        with ``resource_name == name``. There is no rollback: if any script fails
+        the exception propagates and the page keeps whatever earlier scripts
+        already did. Timers/jobs scheduled by scripts do NOT run in the background
+        — only ``run_timers()`` / ``run_jobs()`` execute them. ``scripts=None`` /
+        ``[]`` and ``resources=None`` / ``{}`` degrade to the plain load path.
 
         M3-4 lifecycle events: on a successful load (after all scripts run), two
         JS events are auto-dispatched in a fixed order — ``DOMContentLoaded`` on
@@ -160,24 +194,47 @@ class Page:
             raise TypeError("html must be a str")
         if not isinstance(base_url, str):
             raise TypeError("base_url must be a str")
-        # Validate scripts before touching page state or the lifecycle (bad input
-        # must neither reload the page nor enter "loading").
+        # Validate scripts + resources before touching page state or the lifecycle
+        # (bad input must neither reload the page nor enter "loading").
         normalized = _normalize_scripts(scripts)
+        resource_map = _normalize_resources(resources)
         # M3-2: enter "loading" for the whole install + scripts phase. It only
         # returns to "complete" once everything below succeeds — so a failure
-        # (script JSError, or a disposed/busy context) leaves ready_state
-        # "loading" until a later successful load.
+        # (script JSError, missing resource, or a disposed/busy context) leaves
+        # ready_state "loading" until a later successful load.
         self._ready_state = "loading"
         self._native.load(html, base_url)
-        # Execute host-provided scripts in order, in the freshly installed
-        # generation. eval reuses the existing JSError path (resource_name = name)
-        # and shares globals across scripts; a failure propagates (no rollback).
+        # M3-5: run the document's own scripts first, in HTML document order
+        # (inline + external interleaved). Inline scripts run their source
+        # directly (resource_name = the document base URL); a `<script src>` is
+        # resolved against base_url and looked up in the host-provided resources
+        # (resource_name = the resolved URL). A missing resource fails loudly (no
+        # silent skip) via the existing JSError path, with no rollback.
+        for entry in self._native.html_scripts():
+            src = entry["src"]
+            if src is None:
+                self._native.eval(entry["code"], False, base_url)
+            else:
+                url = urljoin(base_url, src)
+                if url not in resource_map:
+                    raise JSError(
+                        "Error",
+                        f"no host resource for <script src>: {url}",
+                        "",
+                        url,
+                        None,
+                        None,
+                    )
+                self._native.eval(resource_map[url], False, url)
+        # Then the M3-1 host-provided scripts (after the HTML scripts), in list
+        # order. eval reuses the existing JSError path (resource_name = name) and
+        # shares globals across all scripts; a failure propagates (no rollback).
         for name, code in normalized:
             self._native.eval(code, False, name)
         # M3-4: on a successful load, auto-dispatch the lifecycle events in a fixed
         # order — DOMContentLoaded on document, then load on window. This runs only
-        # after every script succeeded (a failed script raised above and skipped
-        # this), so a failed load dispatches no lifecycle events.
+        # after every script (HTML + M3-1) succeeded (a failure raised above and
+        # skipped this), so a failed load dispatches no lifecycle events.
         self._native.dispatch_lifecycle_events()
         self._ready_state = "complete"
 

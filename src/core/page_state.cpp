@@ -362,11 +362,23 @@ struct DomNode {
     std::string class_name;            // raw class attribute value, or ""
     bool has_class = false;            // whether a class attribute was present
     std::vector<std::string> classes;  // class tokens (for .class matching)
+    std::string src;                   // M3-5 src attribute value (script), or ""
+    bool has_src = false;              // whether a src attribute was present
     std::string text_content;          // M2-7 aggregate text (precomputed)
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
     std::size_t content_start = 0;     // [start,end) of inner HTML in the source
     std::size_t content_end = 0;
+};
+
+// M3-5 script descriptor extracted from HTML in document order. An inline script
+// has has_src == false and its JS source in `code`; a `<script src>` has
+// has_src == true, its raw src attribute in `src`, and an empty `code` (its
+// source is resolved by the host via Page.load(resources=...)).
+struct ScriptRecord {
+    bool has_src = false;
+    std::string src;
+    std::string code;
 };
 
 bool is_void_element(const std::string& tag) {
@@ -396,9 +408,11 @@ std::vector<std::string> split_class_tokens(const std::string& value) {
     return tokens;
 }
 
-// Capture id + class from the raw attribute text inside a start tag. Minimal
-// attribute tokenizer (quoted / bare values); ONLY id and class are retained —
-// every other attribute is ignored (M2-7 getAttribute answers only these two).
+// Capture id + class (+ M3-5 src) from the raw attribute text inside a start tag.
+// Minimal attribute tokenizer (quoted / bare values). Only id, class, and src are
+// retained — every other attribute is ignored. getAttribute still answers only id
+// and class (M2-7/M2-8); src is captured solely for `<script src>` resolution and
+// is NOT exposed through getAttribute.
 void parse_attributes(const std::string& attrs, DomNode& node) {
     const std::size_t n = attrs.size();
     std::size_t i = 0;
@@ -436,15 +450,45 @@ void parse_attributes(const std::string& attrs, DomNode& node) {
             node.class_name = value;
             node.has_class = true;
             node.classes = split_class_tokens(value);
+        } else if (name == "src") {
+            node.src = value;
+            node.has_src = true;
         }
     }
 }
 
+// Find the next case-insensitive "</script" at or after `from`, or npos. Used to
+// treat <script> as a raw-text element (its body is not tag-parsed), so inline JS
+// containing '<' / '>' is captured verbatim.
+std::size_t find_script_close(const std::string& html, std::size_t from) {
+    static const char kNeedle[] = "</script";
+    const std::size_t needle_len = sizeof(kNeedle) - 1;
+    const std::size_t n = html.size();
+    for (std::size_t p = from; p + needle_len <= n; ++p) {
+        bool match = true;
+        for (std::size_t q = 0; q < needle_len; ++q) {
+            const char c = static_cast<char>(
+                std::tolower(static_cast<unsigned char>(html[p + q])));
+            if (c != kNeedle[q]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return p;
+        }
+    }
+    return std::string::npos;
+}
+
 // Minimal tag-stack HTML parse into a node forest. Text/comments/doctype are
-// skipped; only start/end tags build structure. NOT HTML5-conformant.
+// skipped; only start/end tags build structure. NOT HTML5-conformant. M3-5:
+// <script> is handled as a raw-text element (its body is captured verbatim, not
+// tag-parsed) and every script is appended to `scripts` in document order.
 void parse_html(const std::string& html,
                 std::vector<std::unique_ptr<DomNode>>& pool,
-                std::vector<DomNode*>& roots) {
+                std::vector<DomNode*>& roots,
+                std::vector<ScriptRecord>& scripts) {
     std::vector<DomNode*> stack;
     const std::size_t n = html.size();
     std::size_t i = 0;
@@ -511,6 +555,30 @@ void parse_html(const std::string& html,
             raw->parent = stack.back();
             stack.back()->children.push_back(raw);
         }
+
+        // M3-5: <script> is a raw-text element. Consume its body verbatim up to
+        // </script> (so inline JS with '<'/'>' is not mis-parsed as tags), record
+        // the script in document order, and do NOT push it on the stack. A
+        // self-closing <script/> carries no body and no script is recorded.
+        if (tag == "script" && !self_closing) {
+            const std::size_t close = find_script_close(html, i);
+            const std::size_t content_end = (close == std::string::npos) ? n : close;
+            raw->content_end = content_end;
+            ScriptRecord record;
+            record.has_src = raw->has_src;
+            record.src = raw->src;
+            if (!raw->has_src) {  // inline: capture the raw JS source
+                record.code = html.substr(i, content_end - i);
+            }
+            scripts.push_back(std::move(record));
+            // Advance past the </script ...> end tag.
+            std::size_t k = (close == std::string::npos) ? n : close;
+            while (k < n && html[k] != '>') k++;
+            if (k < n) k++;
+            i = k;
+            continue;
+        }
+
         if (!self_closing && !is_void_element(tag)) {
             stack.push_back(raw);
         }
@@ -813,8 +881,11 @@ class DocumentHost : public EventTargetHost {
 public:
     DocumentHost(const std::string& html, std::string url)
         : url_(std::move(url)), title_(extract_title(html)) {
-        parse_html(html, pool_, roots_);
+        parse_html(html, pool_, roots_, scripts_);
     }
+
+    // M3-5: the scripts found in the HTML, in document order (inline + external).
+    const std::vector<ScriptRecord>& scripts() const { return scripts_; }
 
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
@@ -930,6 +1001,7 @@ private:
     std::string title_;
     std::vector<std::unique_ptr<DomNode>> pool_;
     std::vector<DomNode*> roots_;
+    std::vector<ScriptRecord> scripts_;  // M3-5 scripts in document order
     std::vector<std::unique_ptr<ElementHost>> elements_;
     std::unordered_map<DomNode*, ElementHost*> wrappers_;
 };
@@ -1275,6 +1347,30 @@ void PageState::dispatch_lifecycle_events() {
                     ->dispatch_native(isolate, context, "load", global);
             }
         });
+}
+
+py::list PageState::html_scripts() {
+    // M3-5: the scripts the current document parsed from its HTML, in document
+    // order. Each entry is a dict {"src": str|None, "code": str}: an inline
+    // script has src None and its JS in code; a `<script src>` has its raw src
+    // string and an empty code (the host resolves it via resources in Page.load).
+    // Pure data read (no V8/isolate access, no operation guard) — the GIL is held
+    // by the Python caller.
+    py::list result;
+    if (document_host_ != nullptr) {
+        auto* document = static_cast<DocumentHost*>(document_host_);
+        for (const ScriptRecord& script : document->scripts()) {
+            py::dict entry;
+            if (script.has_src) {
+                entry["src"] = script.src;  // pybind casts std::string -> str
+            } else {
+                entry["src"] = py::none();
+            }
+            entry["code"] = script.code;
+            result.append(entry);
+        }
+    }
+    return result;
 }
 
 void PageState::load(const std::string& html, const std::string& base_url) {

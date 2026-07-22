@@ -19,5 +19,6 @@ void register_page(py::module_& module) {
         .def("run_jobs", &iv8::PageState::run_jobs)
         .def("load", &iv8::PageState::load, py::arg("html"), py::arg("base_url"))
         .def("dispatch_lifecycle_events",
-             &iv8::PageState::dispatch_lifecycle_events);
+             &iv8::PageState::dispatch_lifecycle_events)
+        .def("html_scripts", &iv8::PageState::html_scripts);
 }

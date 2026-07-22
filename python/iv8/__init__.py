@@ -65,6 +65,14 @@ JS-side event target too (``window.addEventListener`` /
 order — ``DOMContentLoaded`` on ``document``, then ``load`` on ``window``; a
 failed load dispatches neither. This adds no new Python API and no new top-level
 object; ``Page.ready_state`` (M3-2) and JS ``document.readyState`` are unchanged.
+M3-5 (HTML Script Integration) adds an optional ``Page.load(..., resources=None)``
+parameter and executes the document's own scripts, in HTML document order:
+inline ``<script>`` runs its source directly, and ``<script src="...">`` is
+resolved against ``base_url`` then looked up in ``resources`` (a host-provided
+``{absolute-url: source}`` mapping — NO network). HTML scripts run before the
+M3-1 ``scripts=[...]``; a ``<script src>`` with no matching resource fails via
+``JSError`` (no silent skip, no rollback); lifecycle events (M3-4) still fire only
+after all scripts succeed. The only public change is the ``resources`` parameter.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

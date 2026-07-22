@@ -55,6 +55,13 @@ public:
     // (a script raised) never calls it. Runs under the operation guard.
     void dispatch_lifecycle_events();
 
+    // M3-5: the scripts parsed from the current document's HTML, in document
+    // order, as a list of {"src": str|None, "code": str} dicts (inline -> src
+    // None + JS in code; `<script src>` -> raw src + empty code). Page.load reads
+    // this after installing the generation to run the HTML scripts. Pure data
+    // read (no V8 access).
+    pybind11::list html_scripts();
+
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the
     // page's host objects + global roots + timers into it. Used by the ctor and
