@@ -61,7 +61,9 @@ def test_event_bubbles_flag_and_stop_propagation_shape():
         # Truthy non-boolean -> true.
         assert page.eval("new Event('e', {bubbles: 1}).bubbles") is True
         assert page.eval("typeof new Event('e').stopPropagation") == "function"
-        assert page.eval("new Event('e').stopPropagation()") is None
+        # A JS method returning `undefined` surfaces as iv8.JSUndefined (not None,
+        # which is JS null).
+        assert page.eval("new Event('e').stopPropagation()") is iv8.JSUndefined
 
 
 # --- (3) shape guard: still no cancellation / phase / CustomEvent surface --------
@@ -361,24 +363,20 @@ def test_script_is_event_target_but_inert():
 
 @on_only
 def test_lifecycle_events_unchanged():
-    order = []
+    # The auto-dispatched lifecycle events (M3-4 / M3-6) stay single-target: a
+    # 'load' on window is NOT reached by a document-level bubble, and the fixed
+    # order / observed readyState are exactly as before M4-A-7.
+    html = (
+        "<html><head></head><body><script>"
+        "globalThis.marks = [];"
+        "document.addEventListener('readystatechange',"
+        " () => marks.push('rsc:' + document.readyState));"
+        "document.addEventListener('DOMContentLoaded', () => marks.push('DCL'));"
+        "window.addEventListener('load', () => marks.push('load'));"
+        "</script></body></html>"
+    )
     with iv8.Page() as page:
-        page.load(
-            html="<html><head></head><body></body></html>",
-            base_url=BASE,
-            scripts=[
-                # window 'load' must NOT be reached by a document-level bubble; the
-                # auto-dispatched lifecycle events are single-target (no bubbles).
-                """
-                globalThis.marks = [];
-                document.addEventListener('readystatechange',
-                    () => globalThis.marks.push('rsc:' + document.readyState));
-                document.addEventListener('DOMContentLoaded',
-                    () => globalThis.marks.push('DCL'));
-                window.addEventListener('load', () => globalThis.marks.push('load'));
-                """
-            ],
-        )
+        page.load(html=html, base_url=BASE)
         assert page.eval("globalThis.marks.join(',')") == (
             "rsc:interactive,DCL,rsc:complete,load"
         )
