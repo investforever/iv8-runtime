@@ -464,6 +464,20 @@ is independent of tree position / form ownership. Still **no** ``button.type`` /
 ``click`` default / submit / event dispatch. No new Python API / top-level object /
 exception.
 
+M5-7 (input checked) adds a read-write ``checked`` boolean property exposed **only
+on ``<input>`` elements** (no other element has ``.checked``). Reading returns the
+current checked state; assigning coerces truthy/falsey → bool. It is a per-node bool
+slot seeded once from the boolean ``checked`` attribute (``<input checked>`` →
+``true``; else / a fresh ``createElement('input')`` → ``false``), then **decoupled**:
+``input.checked = ...`` does **not** write ``getAttribute('checked')``, and
+``setAttribute`` / ``removeAttribute('checked')`` does **not** change the current
+``.checked``. It is a minimal model — every ``type`` shares one ``checked`` bool
+with **no** radio-group exclusivity (two radios can both be ``checked === true``),
+no ``defaultChecked`` / ``indeterminate`` / ``type`` distinction, and no
+``click`` / ``change`` / ``input`` events. It works on a detached ``<input>``, is
+independent of tree position / form ownership, and is orthogonal to ``input.value``.
+No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

@@ -379,6 +379,10 @@ struct DomNode {
     // attribute at parse/create time, then decoupled from the attribute. Only
     // meaningful for <option>.
     bool selected = false;
+    // M5-7 <input>.checked runtime bool. Seeded ONCE from the `checked` attribute
+    // at parse/create time, then decoupled. Only meaningful for <input> (minimal:
+    // no type distinction, no radio-group exclusivity, no defaultChecked).
+    bool checked = false;
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
     std::size_t content_start = 0;     // [start,end) of inner HTML in the source
@@ -584,6 +588,12 @@ void parse_html(const std::string& html,
         if (tag == "option") {
             node->selected =
                 node->attributes.find("selected") != node->attributes.end();
+        }
+        // M5-7: seed <input>.checked once from the boolean `checked` attribute
+        // (present -> true). Decoupled from the attribute thereafter.
+        if (tag == "input") {
+            node->checked =
+                node->attributes.find("checked") != node->attributes.end();
         }
         DomNode* raw = node.get();
         pool.push_back(std::move(node));
@@ -1115,6 +1125,10 @@ public:
         if (node_->tag == "option") {
             names.push_back("selected");
         }
+        // M5-7: `checked` (read-write bool) is exposed only on <input>.
+        if (node_->tag == "input") {
+            names.push_back("checked");
+        }
         return names;
     }
     std::vector<std::string> method_names() const override {
@@ -1145,6 +1159,9 @@ public:
         }
         if (node_->tag == "option") {
             names.push_back("selected");
+        }
+        if (node_->tag == "input") {
+            names.push_back("checked");
         }
         return names;
     }
@@ -1767,6 +1784,10 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "selected") {
         return v8::Boolean::New(isolate, node_->selected);
     }
+    // M5-7: input.checked — the runtime bool slot (exposed only on <input>).
+    if (name == "checked") {
+        return v8::Boolean::New(isolate, node_->checked);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1780,6 +1801,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     // (does NOT write the `selected` attribute). Writable only on <option>.
     if (name == "selected") {
         node_->selected = value->BooleanValue(isolate);
+        return;
+    }
+    // M5-7: input.checked = ... — boolean (truthy) coercion, runtime slot only
+    // (does NOT write the `checked` attribute). Writable only on <input>.
+    if (name == "checked") {
+        node_->checked = value->BooleanValue(isolate);
         return;
     }
     if (name != "textContent" && name != "value") {
