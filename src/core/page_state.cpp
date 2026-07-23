@@ -570,9 +570,10 @@ void parse_html(const std::string& html,
         node->content_start = i;   // just past '>'
         node->content_end = i;     // default empty; set when the end tag closes it
         parse_attributes(body, *node);
-        // M5-3: seed <input>.value once from the parsed `value` attribute (absent
-        // -> ""). Thereafter the runtime .value slot is decoupled from the attr.
-        if (tag == "input") {
+        // M5-3 / M5-6: seed <input>/<button>.value once from the parsed `value`
+        // attribute (absent -> ""). Thereafter the runtime .value slot is decoupled
+        // from the attribute.
+        if (tag == "input" || tag == "button") {
             const auto vit = node->attributes.find("value");
             if (vit != node->attributes.end()) {
                 node->value = vit->second;
@@ -1102,11 +1103,12 @@ public:
             node_->tag == "select" || node_->tag == "textarea") {
             names.push_back("form");
         }
-        // M5-3 / M5-4 / M5-5: `value` is exposed on <input> / <textarea> (writable
-        // text slot), <select> (writable, derived from selected option) and
-        // <option> (read-only, derived from attr/text).
+        // M5-3/4/5/6: `value` is exposed on <input> / <textarea> / <button>
+        // (writable text slot), <select> (writable, derived from selected option)
+        // and <option> (read-only, derived from attr/text).
         if (node_->tag == "input" || node_->tag == "textarea" ||
-            node_->tag == "select" || node_->tag == "option") {
+            node_->tag == "button" || node_->tag == "select" ||
+            node_->tag == "option") {
             names.push_back("value");
         }
         // M5-5: `selected` (read-write bool) is exposed only on <option>.
@@ -1133,12 +1135,12 @@ public:
         names.insert(names.end(), events.begin(), events.end());
         return names;
     }
-    // M2-8: textContent is writable; M5-3/4/5: value on input/textarea/select
-    // (option.value is READ-ONLY); M5-5: option.selected is writable.
+    // M2-8: textContent is writable; M5-3/4/5/6: value on input/textarea/button/
+    // select (option.value is READ-ONLY); M5-5: option.selected is writable.
     std::vector<std::string> writable_property_names() const override {
         std::vector<std::string> names = {"textContent"};
         if (node_->tag == "input" || node_->tag == "textarea" ||
-            node_->tag == "select") {
+            node_->tag == "button" || node_->tag == "select") {
             names.push_back("value");
         }
         if (node_->tag == "option") {
@@ -1741,9 +1743,9 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
         }
         return v8::Null(isolate);
     }
-    // value (exposed on input/textarea/select/option, see property_names):
-    //  - <input>/<textarea> (M5-3/M5-4): the runtime value slot (seeded once, then
-    //    decoupled from the attribute / textContent);
+    // value (exposed on input/textarea/button/select/option, see property_names):
+    //  - <input>/<textarea>/<button> (M5-3/4/6): the runtime value slot (seeded
+    //    once, then decoupled from the attribute / textContent);
     //  - <select> (M5-5): the value of the first selected <option> in its subtree,
     //    or "" if none — derived, not stored;
     //  - <option> (M5-5): its `value` attribute (live), else its text content.
@@ -1812,9 +1814,9 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
             }
             return;
         }
-        // M5-3/M5-4: input/textarea.value = ... writes the runtime slot only (does
-        // NOT touch the attribute / textContent). option.value is read-only (not in
-        // writable_property_names), so <option> never reaches here.
+        // M5-3/4/6: input/textarea/button.value = ... writes the runtime slot only
+        // (does NOT touch the attribute / textContent). option.value is read-only
+        // (not in writable_property_names), so <option> never reaches here.
         node_->value = str_value;
         return;
     }

@@ -28,20 +28,20 @@ def test_no_new_python_surface():
     assert not hasattr(iv8.Page, "value")
 
 
-# --- .value on <textarea>; not on button/div -----------------------------------
+# --- .value on <textarea>; not on div -------------------------------------------
 
 @on_only
 def test_value_on_textarea_not_others():
     html = ("<html><body>"
             "<textarea id='ta'></textarea>"
-            "<button id='bt'></button><div id='dv'></div>"
+            "<div id='dv'></div>"
             "</body></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         assert page.eval("typeof document.getElementById('ta').value") == "string"
-        # (select gained .value in M5-5, and option .value/.selected too; button /
-        # div stay out.)
-        for nid in ("bt", "dv"):
+        # (select gained .value in M5-5, button in M5-6, option .value too; a plain
+        # <div> stays out.)
+        for nid in ("dv",):
             assert page.eval(f"typeof document.getElementById('{nid}').value") == "undefined"
 
 

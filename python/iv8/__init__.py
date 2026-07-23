@@ -448,9 +448,21 @@ current tree (subtree/ancestor based), work on a detached ``<select>`` / ``<opti
 and setting ``option.selected`` is immediately reflected by the owning
 ``select.value``. Still **no** ``selectedIndex`` / ``options`` / ``multiple`` /
 ``size`` / ``defaultSelected`` / ``optgroup`` / ``option.text`` /
-``select.add``/``remove`` / ``HTMLSelectElement`` / ``HTMLOptionElement``, no
-``button.value``, and no automatic ``change`` / ``input`` events. No new Python API
-/ top-level object / exception.
+``select.add``/``remove`` / ``HTMLSelectElement`` / ``HTMLOptionElement``, and no
+automatic ``change`` / ``input`` events. No new Python API / top-level object /
+exception.
+
+M5-6 (button value) extends the read-write ``value`` string property to
+``<button>`` elements (no other element beyond the M5-3/4/5 set gains ``.value``).
+It behaves exactly like ``input.value``: a runtime slot seeded once from the parsed
+``value`` attribute at create/parse time (absent → ``""``; a fresh
+``createElement('button')`` → ``""``), then **decoupled** — ``button.value = ...``
+does **not** update ``getAttribute('value')`` and ``setAttribute('value', ...)``
+does **not** change the current ``.value``. It works on a detached ``<button>`` and
+is independent of tree position / form ownership. Still **no** ``button.type`` /
+``button.disabled`` / ``defaultValue`` / specialized ``HTMLButtonElement``, and no
+``click`` default / submit / event dispatch. No new Python API / top-level object /
+exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
