@@ -111,8 +111,9 @@ def test_element_has_no_mutation_or_query_surface():
         # (M2-8/M4-A-4 add setAttribute/removeAttribute; M4-A-3 adds appendChild/
         # removeChild/insertBefore; M4-A-5 adds element querySelector[All]/
         # getElementsByTagName — these stay out of scope: replaceChild, the
-        # append/remove/prepend family, matches/closest, innerHTML/style.)
-        for absent in ("innerHTML", "outerHTML", "replaceChild", "matches",
+        # append/remove/prepend family, closest, innerHTML/style. (matches arrived
+        # in M4-B-3.)
+        for absent in ("innerHTML", "outerHTML", "replaceChild",
                        "closest", "append", "remove", "prepend", "style"):
             assert page.eval(f"document.body.{absent} === undefined") is True
 

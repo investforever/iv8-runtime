@@ -218,7 +218,8 @@ def test_shape_guard():
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         el = "document.getElementById('d')"
-        for member in ("matches", "closest", "getElementsByClassName"):
+        # (matches arrived in M4-B-3 — see test_matches.py; closest stays out.)
+        for member in ("closest", "getElementsByClassName"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"
         # Returned arrays carry no HTMLCollection extras.
         assert page.eval(f"typeof {el}.querySelectorAll('span').item") == "undefined"

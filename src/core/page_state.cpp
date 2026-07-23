@@ -1054,7 +1054,9 @@ public:
             "insertBefore",     "querySelector",   "querySelectorAll",
             "getElementsByTagName",
             // M4-B-2 minimal ancestor/containment check.
-            "contains"};
+            "contains",
+            // M4-B-3 single-node selector match.
+            "matches"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1713,6 +1715,16 @@ v8::Local<v8::Value> ElementHost::call_method(
             }
         }
         return v8::Boolean::New(isolate, result);
+    }
+    // M4-B-3 single-node selector match: apply the SAME minimal selector predicate
+    // used by document/element querySelector[All] (#id / .class / tagname) to this
+    // node only. A complex/empty/unsupported selector yields a match-nothing
+    // predicate -> false (no syntax error). Depends only on this element's own
+    // tag/id/class (live), not on its position in the tree, so it works on a
+    // detached element too.
+    if (name == "matches") {
+        return v8::Boolean::New(isolate,
+                                selector_predicate(arg_string(0))(node_));
     }
     return v8::Undefined(isolate);
 }

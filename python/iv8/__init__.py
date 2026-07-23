@@ -237,6 +237,20 @@ agrees with the query / sibling surface, and it is independent of ``isConnected`
 element yet stays inert. No ``document.contains`` / ``compareDocumentPosition`` /
 ``getRootNode``, no new Python API / top-level object / exception.
 
+M4-B-3 (single-node selector match) adds one element method,
+``element.matches(selector)``: ``true`` iff this element matches ``selector`` under
+the SAME minimal selector subset as the query surface (exactly one of ``#id`` /
+``.class`` / ``tagname``), else ``false``. Any complex / unsupported / empty
+selector returns ``false`` (no syntax error). It looks only at this element's own
+tag / id / class — live (so ``setAttribute`` / ``removeAttribute`` of id/class
+change the result at once) and independent of the tree position, so it works on a
+detached element (``el.matches('#a')`` after ``el.setAttribute('id','a')`` is
+``true`` even while ``el.isConnected === false``). It shares the exact predicate of
+``querySelector`` / ``querySelectorAll``, so a node in a query's result set matches
+that selector. An inserted ``<script>`` matches ``'script'`` yet stays inert. No
+``closest`` / ``webkitMatchesSelector`` / ``msMatchesSelector``, no complex/attribute
+selectors, no new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
