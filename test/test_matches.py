@@ -229,5 +229,7 @@ def test_no_out_of_scope_match_surface():
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         el = "document.getElementById('d')"
-        for member in ("closest", "webkitMatchesSelector", "msMatchesSelector"):
+        # (closest arrived in M4-B-4 — see test_closest.py; vendor-prefixed forms
+        # stay out.)
+        for member in ("webkitMatchesSelector", "msMatchesSelector"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"

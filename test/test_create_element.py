@@ -181,8 +181,9 @@ def test_no_out_of_scope_creation_or_tree_surface():
         # removeAttribute; M4-A-5 adds element querySelector[All]/
         # getElementsByTagName; M4-A-6 adds ownerDocument/isConnected/
         # previous|nextElementSibling; still out of scope here: raw previous/next
-        # Sibling, closest, replaceChild, innerHTML. (matches arrived in M4-B-3.)
+        # Sibling, replaceChild, innerHTML. (matches arrived in M4-B-3, closest in
+        # M4-B-4.)
         el = "document.createElement('div')"
-        for member in ("previousSibling", "nextSibling", "closest",
+        for member in ("previousSibling", "nextSibling",
                        "replaceChild", "innerHTML", "outerHTML"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"

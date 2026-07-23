@@ -1056,7 +1056,9 @@ public:
             // M4-B-2 minimal ancestor/containment check.
             "contains",
             // M4-B-3 single-node selector match.
-            "matches"};
+            "matches",
+            // M4-B-4 nearest-ancestor selector match.
+            "closest"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1725,6 +1727,22 @@ v8::Local<v8::Value> ElementHost::call_method(
     if (name == "matches") {
         return v8::Boolean::New(isolate,
                                 selector_predicate(arg_string(0))(node_));
+    }
+    // M4-B-4 nearest-ancestor selector match: check this node first, then walk the
+    // parent chain, returning the first node whose own tag/id/class matches the
+    // same minimal selector (shared with matches / querySelector[All]); JS null if
+    // none. Complex/empty selector -> match-nothing predicate -> null. Walks the
+    // live parent chain, so it follows tree edits and works within a detached
+    // subtree (independent of isConnected). Wrapping reuses wrap_element.
+    if (name == "closest") {
+        const std::function<bool(const DomNode*)> pred =
+            selector_predicate(arg_string(0));
+        for (DomNode* n = node_; n != nullptr; n = n->parent) {
+            if (pred(n)) {
+                return document_->wrap_element(isolate, context, n);
+            }
+        }
+        return v8::Null(isolate);
     }
     return v8::Undefined(isolate);
 }

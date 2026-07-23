@@ -248,8 +248,24 @@ detached element (``el.matches('#a')`` after ``el.setAttribute('id','a')`` is
 ``true`` even while ``el.isConnected === false``). It shares the exact predicate of
 ``querySelector`` / ``querySelectorAll``, so a node in a query's result set matches
 that selector. An inserted ``<script>`` matches ``'script'`` yet stays inert. No
-``closest`` / ``webkitMatchesSelector`` / ``msMatchesSelector``, no complex/attribute
+``webkitMatchesSelector`` / ``msMatchesSelector``, no complex/attribute
 selectors, no new Python API / top-level object / exception.
+
+M4-B-4 (nearest-ancestor selector match) adds one element method,
+``element.closest(selector)``: starting at this element and walking the
+``parentElement`` chain upward, it returns the first element that
+``matches(selector)`` (self-first), or ``null`` if none up to the root. It reuses
+the same minimal selector subset (``#id`` / ``.class`` / ``tagname``); a complex /
+unsupported / empty selector returns ``null`` (no syntax error). It walks the live
+parent chain, so it follows tree edits (reparent changes the search path; reorder
+does not) and works within a detached subtree independent of ``isConnected`` (e.g.
+``c.closest('.box')`` returns the detached ancestor ``p`` while
+``p.isConnected === false``). It agrees with ``matches`` / ``contains`` (if
+``el.matches(sel)`` then ``el.closest(sel) === el``; a returned ancestor both
+``matches`` the selector and ``contains`` the element). An inserted ``<script>``
+participates yet stays inert. No ``webkitClosest`` / ``document.closest`` / extra
+ancestor API, no complex selectors, no new Python API / top-level object /
+exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
