@@ -1152,7 +1152,9 @@ public:
         // the M3-3 event methods.
         std::vector<std::string> names = {"getElementById", "querySelector",
                                           "querySelectorAll", "getElementsByTagName",
-                                          "createElement"};
+                                          "createElement",
+                                          // M4-B-13 single-token class query.
+                                          "getElementsByClassName"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1289,6 +1291,24 @@ public:
         }
         if (name == "getElementsByTagName") {  // M4-A-1
             return elements_array(isolate, context, elements_by_tag(arg));
+        }
+        if (name == "getElementsByClassName") {  // M4-B-13: single-token class query
+            // String(name) split into class tokens (same tokenizer as className /
+            // setAttribute('class', ...)). Exactly one token -> match every element
+            // whose class token set contains it (same test as the `.class`
+            // selector). Empty / whitespace-only / multi-token -> [] (no throw). No
+            // multi-token intersection, no case folding. Live tree, document order,
+            // detached elements excluded (collect walks roots_).
+            std::vector<std::string> tokens = split_class_tokens(arg);
+            std::vector<DomNode*> nodes;
+            if (tokens.size() == 1) {
+                const std::string token = tokens[0];
+                nodes = collect([&token](const DomNode* n) {
+                    return std::find(n->classes.begin(), n->classes.end(), token) !=
+                           n->classes.end();
+                });
+            }
+            return elements_array(isolate, context, nodes);
         }
         if (name == "createElement") {  // M4-A-2: detached element (not in the tree)
             auto node = std::make_unique<DomNode>();

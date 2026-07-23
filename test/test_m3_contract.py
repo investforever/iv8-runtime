@@ -59,8 +59,8 @@ def test_js_document_surface_not_exceeded():
         # (M4-A-1 added document.querySelectorAll / getElementsByTagName / head;
         # M4-A-2 added document.createElement; these remain out of scope.)
         # (document.forms/images/links/anchors/embeds/applets arrived in
-        # M4-B-7..12 — see their test files.)
-        for member in ("getElementsByClassName", "createElementNS",
+        # M4-B-7..12, getElementsByClassName in M4-B-13 — see their test files.)
+        for member in ("createElementNS",
                        "createTextNode", "createComment", "write",
                        "onreadystatechange", "plugins", "all"):
             assert page.eval(f"typeof document.{member}") == "undefined"

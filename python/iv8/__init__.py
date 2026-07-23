@@ -358,6 +358,20 @@ element: **no** plugin / Java / media / network, no ``.code`` / ``.archive`` /
 ``.object`` reflection, no events / playback / sizing, no ``HTMLAppletElement``, and
 no ``document.plugins``. No new Python API / top-level object / exception.
 
+M4-B-13 (single-token class query) adds the method
+``document.getElementsByClassName(name)``: it returns a plain JS ``Array`` of the
+elements in the current tree whose class-token set contains the given class, in
+document order (recollected live per call; empty → ``[]``). ``name`` is coerced with
+``String(name)`` and split into class tokens (the same tokenizer as ``className`` /
+``setAttribute('class', ...)``): **exactly one** token matches (using the same test
+as the ``.class`` selector, so it agrees with ``querySelectorAll('.x')``); an empty
+/ whitespace-only / multi-token argument returns ``[]`` (no error, no multi-token
+intersection, no case folding). Like the collections it is **not** an
+``HTMLCollection`` (no ``item()`` / ``namedItem()``) and carries no array/wrapper
+identity guarantee, reflects the live tree, and excludes detached elements. No
+``element.getElementsByClassName``, no live ``HTMLCollection``, no
+``document.all``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
