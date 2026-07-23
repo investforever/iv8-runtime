@@ -48,9 +48,10 @@ def test_reset_only_on_form():
 def test_empty_form_reset():
     with iv8.Page() as page:
         page.load(html="<html><body><form id='f'></form></body></html>", base_url=BASE)
-        assert page.eval("document.getElementById('f').reset()") is None
+        # A JS method returning undefined surfaces as iv8.JSUndefined (not None).
+        assert page.eval("document.getElementById('f').reset()") is iv8.JSUndefined
         # a detached, freshly created form too
-        assert page.eval("document.createElement('form').reset()") is None
+        assert page.eval("document.createElement('form').reset()") is iv8.JSUndefined
 
 
 # --- restores input.value / input.checked --------------------------------------
