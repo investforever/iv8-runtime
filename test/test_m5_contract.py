@@ -101,8 +101,9 @@ def test_frozen_items_absent():
         # select: no options / selectedIndex / multiple / size
         for m in ("options", "selectedIndex", "multiple", "size"):
             assert page.eval(f"typeof document.getElementById('se').{m}") == "undefined"
-        # input: no defaultValue / defaultChecked / type / disabled
-        for m in ("defaultValue", "defaultChecked", "type", "disabled"):
+        # input: no defaultValue / type / disabled. (defaultChecked arrived in M6-2
+        # — see test_input_default_checked.py.)
+        for m in ("defaultValue", "type", "disabled"):
             assert page.eval(f"typeof document.getElementById('in').{m}") == "undefined"
         # option: no label / index / defaultSelected
         for m in ("label", "index", "defaultSelected"):

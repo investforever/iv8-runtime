@@ -503,8 +503,20 @@ and is **fixed** thereafter: later ``setAttribute`` / ``textContent`` /
 ``createElement`` control's baseline is ``""`` / ``false``). It reads the live
 subtree (a control reparented out of the form is unaffected) and works on a detached
 ``<form>``. Still **no** ``form.submit()`` / ``requestSubmit()`` / validation /
-``reset`` (or any) event dispatch / default action, and no ``defaultValue`` /
-``defaultChecked``. No new Python API / top-level object / exception.
+``reset`` (or any) event dispatch / default action, and no ``defaultValue``. No new
+Python API / top-level object / exception.
+
+M6-2 (input default-checked) adds a read-only ``defaultChecked`` boolean property
+exposed **only on ``<input>`` elements** (no other element has it). It returns the
+input's fixed **reset baseline** checked value — the M6-1 initial snapshot: `<input
+checked>` → ``true``; no ``checked`` attribute / a fresh ``createElement('input')``
+→ ``false``. It is read-only and **fixed**: it does not follow the live
+``input.checked``, and ``input.checked = ...`` / ``setAttribute`` /
+``removeAttribute('checked')`` do **not** change it. It is exactly the value
+``form.reset()`` restores ``.checked`` to. Works on a detached ``<input>``; a
+repeated ``load()`` / ``createElement`` establishes each new node's own baseline.
+Still **no** ``option.defaultSelected`` / ``defaultValue`` / a writable default /
+specialized ``HTMLInputElement``. No new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
