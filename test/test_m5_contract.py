@@ -91,8 +91,9 @@ def test_frozen_items_absent():
             "</form></body></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        # form: no submission surface / length / control-collection helpers
-        for m in ("submit", "requestSubmit", "reset", "length", "elements.item"):
+        # form: no submission surface / length / control-collection helpers.
+        # (form.reset() arrived in M6-1 — see test_form_reset.py; the rest stay out.)
+        for m in ("submit", "requestSubmit", "length", "elements.item"):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
         # element.getElementsByClassName still frozen (M4-B-13 kept it out)
         assert page.eval(

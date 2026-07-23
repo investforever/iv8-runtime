@@ -491,6 +491,21 @@ detached ``<option>``, and is unaffected by tree editing / form ownership. Still
 ``select.options`` / ``selectedIndex`` / ``optgroup`` / ``HTMLOptionElement``, and
 no other element's ``.text``. No new Python API / top-level object / exception.
 
+M6-1 (form reset) adds a method ``form.reset()`` exposed **only on ``<form>``
+elements** (no other element has ``.reset``). It takes no arguments, returns
+``undefined``, and restores the supported M5 control state of every such control in
+the form's **current subtree** — ``input.value`` / ``input.checked`` /
+``textarea.value`` / ``button.value`` / ``option.selected`` (and thereby
+``select.value``, which is derived) — to its **initial seeded value**. The reset
+baseline is snapshotted at parse/create time (after the M5-5 select normalization)
+and is **fixed** thereafter: later ``setAttribute`` / ``textContent`` /
+``.value`` / ``.checked`` / ``.selected`` edits do **not** move it (a fresh
+``createElement`` control's baseline is ``""`` / ``false``). It reads the live
+subtree (a control reparented out of the form is unaffected) and works on a detached
+``<form>``. Still **no** ``form.submit()`` / ``requestSubmit()`` / validation /
+``reset`` (or any) event dispatch / default action, and no ``defaultValue`` /
+``defaultChecked``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

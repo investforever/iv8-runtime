@@ -383,6 +383,14 @@ struct DomNode {
     // at parse/create time, then decoupled. Only meaningful for <input> (minimal:
     // no type distinction, no radio-group exclusivity, no defaultChecked).
     bool checked = false;
+    // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
+    // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
+    // not follow later attribute/textContent edits). reset() restores value /
+    // selected / checked from these. createElement nodes default to "" / false /
+    // false, matching their created state.
+    std::string initial_value;
+    bool initial_selected = false;
+    bool initial_checked = false;
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
     std::size_t content_start = 0;     // [start,end) of inner HTML in the source
@@ -1147,6 +1155,10 @@ public:
             "matches",
             // M4-B-4 nearest-ancestor selector match.
             "closest"};
+        // M6-1: reset() is exposed only on <form>.
+        if (node_->tag == "form") {
+            names.push_back("reset");
+        }
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1229,6 +1241,15 @@ public:
                     seen = true;
                 }
             }
+        }
+        // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
+        // the fully-seeded, normalized value/selected/checked. Fixed thereafter
+        // (runtime attribute/textContent/.value/.checked/.selected edits do not
+        // move it). createElement nodes keep their defaults ("" / false / false).
+        for (const std::unique_ptr<DomNode>& node : pool_) {
+            node->initial_value = node->value;
+            node->initial_selected = node->selected;
+            node->initial_checked = node->checked;
         }
     }
 
@@ -2062,6 +2083,29 @@ v8::Local<v8::Value> ElementHost::call_method(
             }
         }
         return v8::Null(isolate);
+    }
+    // M6-1 form.reset() (exposed only on <form>): restore the supported control
+    // state (input/textarea/button.value, input.checked, option.selected) of every
+    // such control in this form's CURRENT subtree to its parse/create-time initial
+    // seed. select.value has no own slot, so it recovers via option.selected.
+    // Restoring all three slots on each matched control is harmless (a control only
+    // reads the slot it exposes). Reads the live subtree, so a reparented control
+    // outside the form is unaffected; works on a detached <form>. Returns undefined;
+    // no reset event, no validation, no submission.
+    if (name == "reset") {
+        std::vector<DomNode*> controls;
+        collect_matching(node_,
+                         [](const DomNode* n) {
+                             return n->tag == "input" || n->tag == "textarea" ||
+                                    n->tag == "button" || n->tag == "option";
+                         },
+                         controls);
+        for (DomNode* control : controls) {
+            control->value = control->initial_value;
+            control->checked = control->initial_checked;
+            control->selected = control->initial_selected;
+        }
+        return v8::Undefined(isolate);
     }
     return v8::Undefined(isolate);
 }

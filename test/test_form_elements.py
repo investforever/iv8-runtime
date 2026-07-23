@@ -47,7 +47,9 @@ def test_present_only_on_form():
         for member in ("item", "namedItem"):
             assert page.eval(
                 f"typeof document.getElementById('f').elements.{member}") == "undefined"
-        for member in ("submit", "requestSubmit", "reset", "length", "action", "method"):
+        # (form.reset() arrived in M6-1 — see test_form_reset.py; submit et al. stay
+        # out.)
+        for member in ("submit", "requestSubmit", "length", "action", "method"):
             assert page.eval(f"typeof document.getElementById('f').{member}") == "undefined"
 
 
