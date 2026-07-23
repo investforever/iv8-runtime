@@ -296,8 +296,20 @@ agree. Like the other collections it is **not** an ``HTMLCollection`` (no ``item
 / ``namedItem()``) and carries no array/wrapper identity guarantee (read by
 ``.length`` / ``.id`` / ``.tagName``). A ``<form>`` is treated as a plain element:
 **no** ``HTMLFormElement`` / ``form.elements`` / ``submit()`` / ``requestSubmit()`` /
-``reset()`` / ``FormData`` / control association, and no ``document.images`` /
-``links`` / ``anchors``. No new Python API / top-level object / exception.
+``reset()`` / ``FormData`` / control association, and no ``document.links`` /
+``anchors``. No new Python API / top-level object / exception.
+
+M4-B-8 (document image collection) adds the read-only ``document.images``: a plain
+JS ``Array`` of every ``<img>`` element in the current tree, in document order
+(recollected live per read; empty → ``[]``), using the same collector as
+``getElementsByTagName('img')`` — so a detached ``<img>`` is excluded and the two
+agree. Like the other collections it is **not** an ``HTMLCollection`` (no ``item()``
+/ ``namedItem()``) and carries no array/wrapper identity guarantee (read by
+``.length`` / ``.id`` / ``.tagName``). An ``<img>`` is treated as a plain (void)
+element: **no** ``HTMLImageElement`` / ``.src`` / ``.naturalWidth`` / ``.complete``
+/ ``.decode()``, no image loading / decoding / events / network / side effects, and
+no ``document.embeds`` / ``applets``. No new Python API / top-level object /
+exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

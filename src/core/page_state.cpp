@@ -1135,7 +1135,9 @@ public:
                 // M4-B-6 document's direct element children.
                 "children",
                 // M4-B-7 all <form> elements in the current tree.
-                "forms"};
+                "forms",
+                // M4-B-8 all <img> elements in the current tree.
+                "images"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1203,6 +1205,12 @@ public:
             // document order, detached <form>s excluded. <form> is treated as a
             // plain element — no HTMLFormElement / submit / elements association.
             return elements_array(isolate, context, elements_by_tag("form"));
+        }
+        if (name == "images") {  // M4-B-8: all <img> elements in the current tree
+            // Same live-tree collector as getElementsByTagName('img'): whole tree,
+            // document order, detached <img>s excluded. <img> is a plain element —
+            // no HTMLImageElement / .src / loading / decoding / events / network.
+            return elements_array(isolate, context, elements_by_tag("img"));
         }
         return v8::Undefined(isolate);
     }
