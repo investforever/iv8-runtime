@@ -531,8 +531,20 @@ only the document-order-first has ``defaultSelected === true`` and the rest
 ``option.selected`` to (and thereby ``select.value``, which is derived). Works on a
 detached ``<option>``; a repeated ``load()`` / ``createElement`` establishes each
 new node's own baseline. Still **no** ``selectedIndex`` / ``select.options`` /
-``multiple`` / ``option.label`` / ``defaultValue`` / specialized
-``HTMLOptionElement``. No new Python API / top-level object / exception.
+``multiple`` / ``option.label`` / specialized ``HTMLOptionElement``. No new Python
+API / top-level object / exception.
+
+M6-4 (input default-value) adds a read-only ``defaultValue`` string property exposed
+**only on ``<input>`` elements** (no other element has it). It returns the input's
+fixed **reset baseline** value — the M6-1 initial snapshot: `<input value="x">` →
+``"x"``; no ``value`` attribute / a fresh ``createElement('input')`` → ``""``. It is
+read-only and **fixed**: it does not follow the live ``input.value``, and
+``input.value = ...`` / ``setAttribute('value', ...)`` do **not** change it. It is
+exactly the value ``form.reset()`` restores ``.value`` to. Works on a detached
+``<input>``; a repeated ``load()`` / ``createElement`` establishes each new node's
+own baseline. Still **no** ``textarea.defaultValue`` / ``button.defaultValue`` / a
+writable default / specialized ``HTMLInputElement``. No new Python API / top-level
+object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
