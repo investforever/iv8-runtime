@@ -61,12 +61,12 @@ def test_js_document_surface_not_exceeded():
         for member in ("getElementById", "querySelector", "querySelectorAll",
                        "getElementsByTagName", "createElement"):
             assert page.eval(f"typeof document.{member}") == "function"
-        # ... and nothing beyond them leaked. (document.forms/images/links arrived
-        # in M4-B-7/8/9; anchors / embeds stay out.)
+        # ... and nothing beyond them leaked. (document.forms/images/links/anchors
+        # arrived in M4-B-7..10; embeds / applets stay out.)
         for member in ("getElementsByClassName", "getElementsByName",
                        "createElementNS", "createTextNode", "createComment",
                        "createDocumentFragment", "importNode", "adoptNode",
-                       "write", "anchors", "embeds"):
+                       "write", "embeds", "applets"):
             assert page.eval(f"typeof document.{member}") == "undefined"
         # A query collection is a plain Array — no HTMLCollection extras.
         assert page.eval("Array.isArray(document.querySelectorAll('div'))") is True

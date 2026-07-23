@@ -324,6 +324,18 @@ behaviour, no ``target`` / ``rel`` / ``download`` / ``ping`` semantics, and no
 ``HTMLAnchorElement`` / ``HTMLAreaElement``. No new Python API / top-level object /
 exception.
 
+M4-B-10 (document anchor collection) adds the read-only ``document.anchors``: a
+plain JS ``Array`` of the ``<a>`` elements in the current tree that **carry a
+``name`` attribute** (presence only — a valueless ``name`` counts; ``<a>`` without
+one, ``<area>``, and all other tags are excluded), in document order (recollected
+live per read; empty → ``[]``). Like the other collections it is **not** an
+``HTMLCollection`` (no ``item()`` / ``namedItem()``) and carries no array/wrapper
+identity guarantee (read by ``.length`` / ``.id`` / ``.tagName`` /
+``getAttribute('name')``). A detached match is excluded, and it reuses the M3-8 /
+M4-A-4 attribute model. ``<a>`` stays a plain element: **no** navigation, no
+``.href`` URL reflection, no fragment jump, no ``click`` default behaviour, and no
+``HTMLAnchorElement``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

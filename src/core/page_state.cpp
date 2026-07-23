@@ -1139,7 +1139,9 @@ public:
                 // M4-B-8 all <img> elements in the current tree.
                 "images",
                 // M4-B-9 <a>/<area> elements that carry an href attribute.
-                "links"};
+                "links",
+                // M4-B-10 <a> elements that carry a name attribute.
+                "anchors"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1224,6 +1226,18 @@ public:
             std::vector<DomNode*> nodes = collect([](const DomNode* n) {
                 return (n->tag == "a" || n->tag == "area") &&
                        n->attributes.find("href") != n->attributes.end();
+            });
+            return elements_array(isolate, context, nodes);
+        }
+        if (name == "anchors") {  // M4-B-10: <a> elements carrying a name attribute
+            // Same live-tree walk (collect over roots_, document order, detached
+            // excluded), filtered to <a> that have a "name" attribute (presence
+            // only — value irrelevant; a valueless name counts). <area> and other
+            // tags never match. Reuses the M3-8/M4-A-4 attribute model; <a> stays a
+            // plain element — no navigation / .href / fragment jump / HTMLAnchorElement.
+            std::vector<DomNode*> nodes = collect([](const DomNode* n) {
+                return n->tag == "a" &&
+                       n->attributes.find("name") != n->attributes.end();
             });
             return elements_array(isolate, context, nodes);
         }
