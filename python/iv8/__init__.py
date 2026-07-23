@@ -372,6 +372,21 @@ identity guarantee, reflects the live tree, and excludes detached elements. No
 ``element.getElementsByClassName``, no live ``HTMLCollection``, no
 ``document.all``. No new Python API / top-level object / exception.
 
+M5-1 (form control collection) adds a read-only ``elements`` property exposed
+**only on ``<form>`` elements** (a non-form element has no ``.elements`` at all): a
+plain JS ``Array`` of the form-control descendants in the form's subtree, in
+document order (recollected live per access; empty → ``[]``). The minimal control
+set is ``input`` / ``button`` / ``select`` / ``textarea`` (no
+``fieldset`` / ``output`` / ``object`` / custom elements, and no
+``disabled`` / ``name`` / ``type`` filtering); a ``<script>`` in the subtree is not
+a control (not counted, and stays inert). Like the other collections it is **not**
+an ``HTMLFormControlsCollection`` (no ``item()`` / ``namedItem()``) and carries no
+array/wrapper identity guarantee (read by ``.length`` / ``.id`` / ``.tagName``). It
+works on a detached ``<form>``. Still **no** ``HTMLFormElement`` / ``form.submit()``
+/ ``requestSubmit()`` / ``reset()`` / ``FormData`` / ``form.length`` / ``form.name``
+/ ``form.action`` / ``form.method`` / control ``.form`` back-reference / validation
+/ radio-group semantics. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

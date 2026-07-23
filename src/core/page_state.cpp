@@ -1035,15 +1035,22 @@ public:
     std::string global_name() const override { return std::string(); }  // never global
     bool is_element() const override { return true; }  // M4-A-3 arg identification
     std::vector<std::string> property_names() const override {
-        return {"tagName",     "nodeName",   "nodeType",   "id",
-                "className",   "textContent", "parentNode", "childNodes",
-                "children",
-                // M4-A-6 connectivity / element-sibling navigation.
-                "ownerDocument", "isConnected", "previousElementSibling",
-                "nextElementSibling",
-                // M4-B-1 structural navigation (element-only tree).
-                "parentElement", "firstElementChild", "lastElementChild",
-                "childElementCount"};
+        std::vector<std::string> names = {
+            "tagName",     "nodeName",   "nodeType",   "id",
+            "className",   "textContent", "parentNode", "childNodes",
+            "children",
+            // M4-A-6 connectivity / element-sibling navigation.
+            "ownerDocument", "isConnected", "previousElementSibling",
+            "nextElementSibling",
+            // M4-B-1 structural navigation (element-only tree).
+            "parentElement", "firstElementChild", "lastElementChild",
+            "childElementCount"};
+        // M5-1: `elements` is exposed only on <form> (so non-form elements have no
+        // `.elements` property at all).
+        if (node_->tag == "form") {
+            names.push_back("elements");
+        }
+        return names;
     }
     std::vector<std::string> method_names() const override {
         // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing +
@@ -1610,6 +1617,24 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "childElementCount") {
         return v8::Integer::New(isolate,
                                 static_cast<std::int32_t>(node_->children.size()));
+    }
+    // M5-1: form.elements — the form-control descendants of this <form>, in document
+    // order (exposed only on <form>, see property_names). Minimal control set:
+    // input / button / select / textarea (no fieldset/output/object/custom, no
+    // disabled/name/type filtering). A subtree walk (element self + descendants;
+    // the <form> itself is not a control so never included); a <script> in the
+    // subtree is not a control -> not counted (and stays inert). Same live-tree
+    // collection + plain-Array wrapping as the subtree queries; not an
+    // HTMLFormControlsCollection (no item/namedItem, no identity guarantee).
+    if (name == "elements") {
+        std::vector<DomNode*> out;
+        collect_matching(node_,
+                         [](const DomNode* n) {
+                             return n->tag == "input" || n->tag == "button" ||
+                                    n->tag == "select" || n->tag == "textarea";
+                         },
+                         out);
+        return document_->elements_array(isolate, context, out);
     }
     return v8::Undefined(isolate);
 }
