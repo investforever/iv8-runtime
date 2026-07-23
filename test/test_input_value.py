@@ -39,9 +39,9 @@ def test_value_only_on_input():
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         assert page.eval("typeof document.getElementById('in').value") == "string"
-        # (textarea 'ta' gained .value in M5-4 — see test_textarea_value.py; the
+        # (textarea 'ta' gained .value in M5-4 and select 'se' in M5-5; the
         # non-value elements below stay out.)
-        for nid in ("dv", "se", "bt"):
+        for nid in ("dv", "bt"):
             assert page.eval(f"typeof document.getElementById('{nid}').value") == "undefined"
 
 

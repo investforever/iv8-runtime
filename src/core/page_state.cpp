@@ -370,11 +370,15 @@ struct DomNode {
     // the fields, everything else to this table). Duplicate names: last wins.
     std::unordered_map<std::string, std::string> attributes;
     std::string text_content;          // M2-7 aggregate text (precomputed)
-    // M5-3 <input>.value runtime slot. Initialized ONCE from the `value` attribute
-    // at parse/create time, then decoupled: input.value = ... writes here only (not
-    // the attribute), and setAttribute('value', ...) does not touch this. Only ever
-    // meaningful for <input> (the property is exposed only there).
+    // M5-3/M5-4 <input>/<textarea>.value runtime slot. Initialized ONCE at
+    // parse/create time (<input> from the `value` attribute, <textarea> from its
+    // text content), then decoupled: value = ... writes here only. Only meaningful
+    // for <input>/<textarea> (the property is exposed only there).
     std::string value;
+    // M5-5 <option>.selected runtime bool. Seeded ONCE from the `selected`
+    // attribute at parse/create time, then decoupled from the attribute. Only
+    // meaningful for <option>.
+    bool selected = false;
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
     std::size_t content_start = 0;     // [start,end) of inner HTML in the source
@@ -574,6 +578,12 @@ void parse_html(const std::string& html,
                 node->value = vit->second;
             }
         }
+        // M5-5: seed <option>.selected once from the boolean `selected` attribute
+        // (present -> true). Decoupled from the attribute thereafter.
+        if (tag == "option") {
+            node->selected =
+                node->attributes.find("selected") != node->attributes.end();
+        }
         DomNode* raw = node.get();
         pool.push_back(std::move(node));
         if (stack.empty()) {
@@ -671,6 +681,25 @@ void collect_matching(DomNode* node,
     for (DomNode* child : node->children) {
         collect_matching(child, pred, out);
     }
+}
+
+// M5-5: an <option>'s value — its `value` attribute if present (read live, so
+// setAttribute('value', ...) is reflected), else its text content (empty -> "").
+std::string option_value_of(const DomNode* option) {
+    const auto it = option->attributes.find("value");
+    if (it != option->attributes.end()) {
+        return it->second;
+    }
+    return option->text_content;
+}
+
+// M5-5: the <option> descendants of `root` in document order (used by
+// select.value's read/write and the initial-selection normalization).
+inline std::vector<DomNode*> collect_options(DomNode* root) {
+    std::vector<DomNode*> out;
+    collect_matching(root, [](const DomNode* n) { return n->tag == "option"; },
+                     out);
+    return out;
 }
 
 // Minimal selector -> node predicate, shared by document- and element-level
@@ -1073,10 +1102,16 @@ public:
             node_->tag == "select" || node_->tag == "textarea") {
             names.push_back("form");
         }
-        // M5-3 / M5-4: `value` (read-write text value) is exposed on <input> and
-        // <textarea>.
-        if (node_->tag == "input" || node_->tag == "textarea") {
+        // M5-3 / M5-4 / M5-5: `value` is exposed on <input> / <textarea> (writable
+        // text slot), <select> (writable, derived from selected option) and
+        // <option> (read-only, derived from attr/text).
+        if (node_->tag == "input" || node_->tag == "textarea" ||
+            node_->tag == "select" || node_->tag == "option") {
             names.push_back("value");
+        }
+        // M5-5: `selected` (read-write bool) is exposed only on <option>.
+        if (node_->tag == "option") {
+            names.push_back("selected");
         }
         return names;
     }
@@ -1098,11 +1133,16 @@ public:
         names.insert(names.end(), events.begin(), events.end());
         return names;
     }
-    // M2-8: textContent is writable; M5-3/M5-4: <input>/<textarea>.value too.
+    // M2-8: textContent is writable; M5-3/4/5: value on input/textarea/select
+    // (option.value is READ-ONLY); M5-5: option.selected is writable.
     std::vector<std::string> writable_property_names() const override {
         std::vector<std::string> names = {"textContent"};
-        if (node_->tag == "input" || node_->tag == "textarea") {
+        if (node_->tag == "input" || node_->tag == "textarea" ||
+            node_->tag == "select") {
             names.push_back("value");
+        }
+        if (node_->tag == "option") {
+            names.push_back("selected");
         }
         return names;
     }
@@ -1150,6 +1190,25 @@ public:
     DocumentHost(const std::string& html, std::string url)
         : url_(std::move(url)), title_(extract_title(html)) {
         parse_html(html, pool_, roots_, scripts_);
+        // M5-5: deterministic initial single-select — within each <select>, keep
+        // only the document-order-first pre-selected <option>, clearing the rest.
+        // (No auto-select when none is pre-selected: select.value is then "".)
+        for (const std::unique_ptr<DomNode>& node : pool_) {
+            if (node->tag != "select") {
+                continue;
+            }
+            bool seen = false;
+            for (DomNode* option : collect_options(node.get())) {
+                if (!option->selected) {
+                    continue;
+                }
+                if (seen) {
+                    option->selected = false;
+                } else {
+                    seen = true;
+                }
+            }
+        }
     }
 
     // M3-5: the scripts found in the HTML, in document order (inline + external).
@@ -1682,14 +1741,29 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
         }
         return v8::Null(isolate);
     }
-    // M5-3/M5-4: value — the runtime value slot (exposed only on <input> and
-    // <textarea>, see property_names). Read returns the current slot; the slot is
-    // seeded once at parse/create time (<input> from its `value` attribute,
-    // <textarea> from its initial text content) and is otherwise decoupled from the
-    // attribute / textContent. Minimal: no type distinction, no sanitization, no
-    // defaultValue/checked/selection.
+    // value (exposed on input/textarea/select/option, see property_names):
+    //  - <input>/<textarea> (M5-3/M5-4): the runtime value slot (seeded once, then
+    //    decoupled from the attribute / textContent);
+    //  - <select> (M5-5): the value of the first selected <option> in its subtree,
+    //    or "" if none — derived, not stored;
+    //  - <option> (M5-5): its `value` attribute (live), else its text content.
     if (name == "value") {
+        if (node_->tag == "select") {
+            for (DomNode* option : collect_options(node_)) {
+                if (option->selected) {
+                    return v8_string(isolate, option_value_of(option));
+                }
+            }
+            return v8_string(isolate, std::string());
+        }
+        if (node_->tag == "option") {
+            return v8_string(isolate, option_value_of(node_));
+        }
         return v8_string(isolate, node_->value);
+    }
+    // M5-5: option.selected — the runtime bool slot (exposed only on <option>).
+    if (name == "selected") {
+        return v8::Boolean::New(isolate, node_->selected);
     }
     return v8::Undefined(isolate);
 }
@@ -1700,8 +1774,14 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
 // no longer see the removed nodes; no separate index needs updating.
 void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> context,
                                const std::string& name, v8::Local<v8::Value> value) {
+    // M5-5: option.selected = ... — boolean (truthy) coercion, runtime slot only
+    // (does NOT write the `selected` attribute). Writable only on <option>.
+    if (name == "selected") {
+        node_->selected = value->BooleanValue(isolate);
+        return;
+    }
     if (name != "textContent" && name != "value") {
-        return;  // only textContent (M2-8) and <input>.value (M5-3) are writable
+        return;  // textContent (M2-8) + value (M5-3/4/5) are the writable props
     }
     std::string str_value;
     v8::Local<v8::String> str;
@@ -1711,10 +1791,30 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
             str_value.assign(*utf8, static_cast<std::size_t>(utf8.length()));
         }
     }
-    // M5-3: input.value = ... writes the runtime slot only (does NOT touch the
-    // `value` attribute). "value" is writable only on <input> (writable_property_
-    // names gates it), so a non-input never reaches here with name == "value".
     if (name == "value") {
+        // M5-5: select.value = X — select the first <option> in this select's
+        // subtree whose value === String(X), clearing every other option's
+        // selected in the same select; no match -> no change. Minimal single-select.
+        if (node_->tag == "select") {
+            std::vector<DomNode*> options = collect_options(node_);
+            DomNode* match = nullptr;
+            for (DomNode* option : options) {
+                if (option_value_of(option) == str_value) {
+                    match = option;
+                    break;
+                }
+            }
+            if (match != nullptr) {
+                for (DomNode* option : options) {
+                    option->selected = false;
+                }
+                match->selected = true;
+            }
+            return;
+        }
+        // M5-3/M5-4: input/textarea.value = ... writes the runtime slot only (does
+        // NOT touch the attribute / textContent). option.value is read-only (not in
+        // writable_property_names), so <option> never reaches here.
         node_->value = str_value;
         return;
     }

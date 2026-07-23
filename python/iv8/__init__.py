@@ -427,9 +427,30 @@ change the current ``.value``, and ``setAttribute(...)`` does not participate. S
 minimal text model (no selection / ``input``&``change`` events / ``defaultValue`` /
 dirty-flag / newline normalization / ``placeholder`` / ``disabled`` / ``readonly`` /
 specialized ``HTMLTextAreaElement``); works on a detached ``<textarea>`` and is
-independent of tree position / form ownership. Still **no** ``select`` /
-``button`` / ``option`` ``.value``. No new Python API / top-level object /
-exception.
+independent of tree position / form ownership. Still **no** ``button`` ``.value``.
+No new Python API / top-level object / exception.
+
+M5-5 (single-select value) adds a minimal single-select model with three
+properties: **``select.value``** (read-write string), **``option.value``**
+(read-only string), and **``option.selected``** (read-write boolean); exposed only
+on ``<select>`` / ``<option>``. ``option.value`` is derived live — its ``value``
+attribute if present (so ``setAttribute('value', ...)`` is reflected), else its text
+content (empty → ``""``). ``option.selected`` is a per-node boolean slot seeded once
+from the ``selected`` attribute (``<option selected>`` → ``true``; else / a fresh
+``createElement('option')`` → ``false``), then decoupled from the attribute.
+``select.value`` is **derived** (no own slot): reading returns the value of the
+first selected ``<option>`` in the select's subtree (none → ``""``); assigning
+selects the first descendant option whose ``value === String(v)`` and clears the
+selected state of every other option in that select (no match → no change). At
+parse/create time, if a ``<select>`` has multiple pre-selected options only the
+document-order-first is kept (no auto-select otherwise). All are live over the
+current tree (subtree/ancestor based), work on a detached ``<select>`` / ``<option>``,
+and setting ``option.selected`` is immediately reflected by the owning
+``select.value``. Still **no** ``selectedIndex`` / ``options`` / ``multiple`` /
+``size`` / ``defaultSelected`` / ``optgroup`` / ``option.text`` /
+``select.add``/``remove`` / ``HTMLSelectElement`` / ``HTMLOptionElement``, no
+``button.value``, and no automatic ``change`` / ``input`` events. No new Python API
+/ top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
