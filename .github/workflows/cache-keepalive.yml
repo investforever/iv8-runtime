@@ -1,0 +1,58 @@
+name: cache-keepalive
+
+# Keep the V8 monolith caches warm. GitHub Actions evicts a cache that has not
+# been ACCESSED for 7 days (a restore/hit resets that timer; a full release run is
+# rare, so between releases the caches would age out and the next build would eat a
+# ~40-min V8 rebuild — exactly what bit release-linux once). This workflow does
+# nothing but RESTORE the two caches on a schedule, resetting their last-accessed
+# timestamps. It never builds or saves V8 (a miss is a harmless no-op — only a real
+# release run repopulates an already-evicted cache); it just prevents eviction of a
+# cache that is still present.
+#
+# Keys/paths MUST match release-linux.yml and release-windows.yml exactly, and each
+# cache is restored on the SAME runner OS that created it (the cache "version" is
+# OS/compression-sensitive, so a cross-OS restore would miss).
+
+on:
+  schedule:
+    # Every 5 days (day-of-month 1,6,11,...,31). Worst-case gap ~5 days < 7.
+    - cron: '17 3 */5 * *'
+  workflow_dispatch:
+
+# Never needs write access — restore only.
+permissions:
+  contents: read
+
+# One keepalive run at a time; don't cancel an in-flight one.
+concurrency:
+  group: cache-keepalive
+  cancel-in-progress: false
+
+jobs:
+  touch-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Touch Linux V8 monolith cache (manylinux)
+        id: touch
+        uses: actions/cache/restore@v4
+        with:
+          path: data/v8
+          key: v8-manylinux2_28-${{ hashFiles('tools/build_v8_manylinux.sh', 'cmake/v8_pin.cmake') }}
+      - name: Report
+        run: echo "linux cache-hit=${{ steps.touch.outputs.cache-hit }}"
+
+  touch-windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Touch Windows V8 monolith cache
+        id: touch
+        uses: actions/cache/restore@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
+      - name: Report
+        run: echo "windows cache-hit=${{ steps.touch.outputs.cache-hit }}"
