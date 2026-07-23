@@ -225,6 +225,18 @@ stays inert). No ``firstChild`` / ``lastChild`` / ``hasChildNodes`` / raw
 ``previousSibling`` / ``nextSibling``, no new Python API / top-level object /
 exception.
 
+M4-B-2 (minimal containment) adds one element method, ``element.contains(node)``:
+``true`` iff ``node`` is an element in the current tree that is this element itself
+or one of its descendants (walking ``parentNode`` upward), else ``false``. A
+non-element argument (``null`` / ``undefined`` / a primitive / a plain object /
+``document`` / ``window`` / an ``Event``) simply returns ``false`` — no type error.
+It is purely structural over the live tree, so it reflects M4-A-3 edits at once and
+agrees with the query / sibling surface, and it is independent of ``isConnected``
+(a detached parent ``contains`` its detached child while both remain
+``isConnected === false``). An inserted ``<script>`` participates as an ordinary
+element yet stays inert. No ``document.contains`` / ``compareDocumentPosition`` /
+``getRootNode``, no new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

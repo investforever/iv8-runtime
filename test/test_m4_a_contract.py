@@ -97,12 +97,12 @@ def test_js_element_surface_not_exceeded():
             assert page.eval(f"typeof {el}.{prop}") != "undefined"
         # ... and none of the still-frozen-out members leaked. (parentElement /
         # firstElementChild / lastElementChild / childElementCount left this list
-        # in M4-B-1 — see test_structure_navigation.py; the rest stay out.)
+        # in M4-B-1 and contains in M4-B-2; the rest stay out.)
         for member in ("attributes", "dataset", "classList", "style",
                        "toggleAttribute", "removeAttributeNS", "hasAttributes",
                        "innerHTML", "outerHTML", "src", "type", "async", "defer",
                        "title", "hidden", "matches", "closest",
-                       "previousSibling", "nextSibling", "contains",
+                       "previousSibling", "nextSibling",
                        "compareDocumentPosition", "getRootNode"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"
 

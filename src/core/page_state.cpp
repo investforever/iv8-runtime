@@ -1052,7 +1052,9 @@ public:
             "getAttribute",     "hasAttribute",    "setAttribute",
             "removeAttribute",  "appendChild",     "removeChild",
             "insertBefore",     "querySelector",   "querySelectorAll",
-            "getElementsByTagName"};
+            "getElementsByTagName",
+            // M4-B-2 minimal ancestor/containment check.
+            "contains"};
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
         return names;
@@ -1693,6 +1695,24 @@ v8::Local<v8::Value> ElementHost::call_method(
         std::vector<DomNode*> out;
         collect_matching(node_, tag_predicate(arg_string(0)), out);
         return document_->elements_array(isolate, context, out);
+    }
+    // M4-B-2 minimal ancestor/containment: true iff the argument is an element in
+    // this tree that is this node itself or a descendant of it. A non-element
+    // argument (null / undefined / primitive / plain object / document / window /
+    // Event) yields nullptr from node_of_arg -> the walk never starts -> false.
+    // Purely structural over the current tree (reflects M4-A-3 edits at once);
+    // independent of isConnected (a detached parent contains its detached child).
+    if (name == "contains") {
+        DomNode* other =
+            node_of_arg(args.Length() > 0 ? args[0] : v8::Local<v8::Value>());
+        bool result = false;
+        for (DomNode* n = other; n != nullptr; n = n->parent) {
+            if (n == node_) {
+                result = true;  // self (n == node_ on the first step) or ancestor
+                break;
+            }
+        }
+        return v8::Boolean::New(isolate, result);
     }
     return v8::Undefined(isolate);
 }

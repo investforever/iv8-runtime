@@ -242,8 +242,9 @@ def test_no_out_of_scope_navigation_surface():
         page.load(html=html, base_url=BASE)
         el = "document.getElementById('d')"
         # NOTE: parentElement / firstElementChild / lastElementChild /
-        # childElementCount were added in M4-B-1 (see test_structure_navigation.py);
-        # they are intentionally no longer part of this frozen-out list.
+        # childElementCount were added in M4-B-1 (test_structure_navigation.py) and
+        # contains in M4-B-2 (test_contains.py); they are intentionally no longer
+        # part of this frozen-out list.
         for member in ("previousSibling", "nextSibling",
-                       "contains", "compareDocumentPosition", "getRootNode"):
+                       "compareDocumentPosition", "getRootNode"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"
