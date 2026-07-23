@@ -1130,8 +1130,10 @@ public:
 
     std::string global_name() const override { return "document"; }
     std::vector<std::string> property_names() const override {
-        return {"URL",  "title",           "readyState", "documentElement",
-                "head", "body",            "currentScript", "scripts"};
+        return {"URL",  "title",           "readyState",  "documentElement",
+                "head", "body",            "currentScript", "scripts",
+                // M4-B-6 document's direct element children.
+                "children"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1184,6 +1186,14 @@ public:
         }
         if (name == "body") {
             return wrap_element(isolate, context, find_tag("body"));
+        }
+        if (name == "children") {  // M4-B-6: document's direct element children
+            // roots_ are the top-level parsed nodes (all elements in this text-node-
+            // free model), in document order — the document's direct children. A
+            // blank generation has none -> []. Reuses the same plain-Array wrapping
+            // as document.scripts / query collections (no HTMLCollection, no
+            // identity guarantee).
+            return elements_array(isolate, context, roots_);
         }
         return v8::Undefined(isolate);
     }

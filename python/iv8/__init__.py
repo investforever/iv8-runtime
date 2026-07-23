@@ -275,9 +275,18 @@ an ``HTMLCollection`` (no ``item()`` / ``namedItem()``) and has no array/wrapper
 identity guarantee (read it by ``.length`` / ``.id`` / ``.tagName``, never by
 ``===``). It is live (reflects M4-A-3 edits), readable on a detached subtree, and
 self-consistent with ``childElementCount`` / ``firstElementChild`` /
-``lastElementChild``; a ``<script>`` child is visible yet inert. No
-``document.children`` / ``firstChild`` / ``lastChild``, no new Python API /
-top-level object / exception.
+``lastElementChild``; a ``<script>`` child is visible yet inert. No ``firstChild`` /
+``lastChild``, no new Python API / top-level object / exception.
+
+M4-B-6 (document child collection) adds the read-only ``document.children``: a plain
+JS ``Array`` of the document's direct element children (the top-level parsed
+elements, in document order; a blank generation → ``[]``). Like ``element.children``
+it is **not** an ``HTMLCollection`` (no ``item()`` / ``namedItem()``) and carries no
+array/wrapper identity guarantee (read by ``.length`` / ``.id`` / ``.tagName``). It
+is consistent with ``documentElement`` / ``head`` / ``body`` and the document
+queries, reflects the live tree, and a top-level ``<script>`` would appear yet stay
+inert. No ``document.childNodes`` / ``firstChild`` / ``lastChild``, no new Python API
+/ top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
