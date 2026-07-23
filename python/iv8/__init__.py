@@ -336,6 +336,17 @@ M4-A-4 attribute model. ``<a>`` stays a plain element: **no** navigation, no
 ``.href`` URL reflection, no fragment jump, no ``click`` default behaviour, and no
 ``HTMLAnchorElement``. No new Python API / top-level object / exception.
 
+M4-B-11 (document embed collection) adds the read-only ``document.embeds``: a plain
+JS ``Array`` of every ``<embed>`` element in the current tree, in document order
+(recollected live per read; empty → ``[]``), using the same collector as
+``getElementsByTagName('embed')`` — so a detached ``<embed>`` is excluded and the
+two agree. Like the other collections it is **not** an ``HTMLCollection`` (no
+``item()`` / ``namedItem()``) and carries no array/wrapper identity guarantee (read
+by ``.length`` / ``.id`` / ``.tagName``). An ``<embed>`` is treated as a plain
+(void) element: **no** plugin/media loading, network, ``.src`` / ``.type``
+reflection, events / playback / sizing, ``HTMLEmbedElement``, or
+``document.plugins``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

@@ -1141,7 +1141,9 @@ public:
                 // M4-B-9 <a>/<area> elements that carry an href attribute.
                 "links",
                 // M4-B-10 <a> elements that carry a name attribute.
-                "anchors"};
+                "anchors",
+                // M4-B-11 all <embed> elements in the current tree.
+                "embeds"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1240,6 +1242,13 @@ public:
                        n->attributes.find("name") != n->attributes.end();
             });
             return elements_array(isolate, context, nodes);
+        }
+        if (name == "embeds") {  // M4-B-11: all <embed> elements in the current tree
+            // Same live-tree collector as getElementsByTagName('embed'): whole tree,
+            // document order, detached <embed>s excluded. <embed> is a plain (void)
+            // element — no plugin/media loading, network, .src/.type reflection,
+            // events, or HTMLEmbedElement; no document.plugins.
+            return elements_array(isolate, context, elements_by_tag("embed"));
         }
         return v8::Undefined(isolate);
     }
