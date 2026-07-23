@@ -95,13 +95,14 @@ def test_js_element_surface_not_exceeded():
             # #d is a child of body, so every listed property resolves to a value
             # (object/string/boolean/null) — never `undefined`.
             assert page.eval(f"typeof {el}.{prop}") != "undefined"
-        # ... and none of the frozen-out members leaked.
+        # ... and none of the still-frozen-out members leaked. (parentElement /
+        # firstElementChild / lastElementChild / childElementCount left this list
+        # in M4-B-1 — see test_structure_navigation.py; the rest stay out.)
         for member in ("attributes", "dataset", "classList", "style",
                        "toggleAttribute", "removeAttributeNS", "hasAttributes",
                        "innerHTML", "outerHTML", "src", "type", "async", "defer",
-                       "title", "hidden", "matches", "closest", "parentElement",
-                       "previousSibling", "nextSibling", "firstElementChild",
-                       "lastElementChild", "childElementCount", "contains",
+                       "title", "hidden", "matches", "closest",
+                       "previousSibling", "nextSibling", "contains",
                        "compareDocumentPosition", "getRootNode"):
             assert page.eval(f"typeof {el}.{member}") == "undefined"
 

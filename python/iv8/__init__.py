@@ -211,6 +211,20 @@ unchanged. No ``cancelable`` / ``defaultPrevented`` / ``preventDefault`` /
 ``eventPhase`` / ``composed`` / ``timeStamp`` / ``CustomEvent``, no capture phase,
 no Python event API / top-level object / exception.
 
+M4-B-1 (structural navigation) adds four read-only element properties on the
+element-only tree: ``parentElement`` (the element parent, or ``null``; in this
+model — where every parent is an element — it matches ``parentNode``),
+``firstElementChild`` / ``lastElementChild`` (the first / last of ``children``, or
+``null`` when empty), and ``childElementCount`` (``children.length``; equal to
+``childNodes.length`` here since there are no text/comment nodes). All are derived
+from the live tree, so M4-A-3 edits are reflected at once, they agree with the
+existing ``children`` / sibling / ``isConnected`` surface, and they work on detached
+subtrees (a detached element reports ``parentElement === null`` and
+``childElementCount === 0``; an inserted ``<script>`` can be a first/last child yet
+stays inert). No ``firstChild`` / ``lastChild`` / ``hasChildNodes`` / raw
+``previousSibling`` / ``nextSibling``, no new Python API / top-level object /
+exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

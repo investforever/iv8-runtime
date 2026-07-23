@@ -1040,7 +1040,10 @@ public:
                 "children",
                 // M4-A-6 connectivity / element-sibling navigation.
                 "ownerDocument", "isConnected", "previousElementSibling",
-                "nextElementSibling"};
+                "nextElementSibling",
+                // M4-B-1 structural navigation (element-only tree).
+                "parentElement", "firstElementChild", "lastElementChild",
+                "childElementCount"};
     }
     std::vector<std::string> method_names() const override {
         // M2-7 read + M2-8/M4-A-4 attribute writes + M4-A-3 tree editing +
@@ -1483,6 +1486,30 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
             return v8::Null(isolate);
         }
         return document_->wrap_element(isolate, context, *next);
+    }
+    // M4-B-1 structural navigation (element-only tree, live). parentElement is the
+    // element parent (in this model parent is always an element, so it matches
+    // parentNode); first/lastElementChild are the ends of the children sequence;
+    // childElementCount is children.size() (== childNodes.length here, but stated
+    // as element-only). All reflect M4-A-3 tree edits at once.
+    if (name == "parentElement") {
+        return document_->wrap_element(isolate, context, node_->parent);
+    }
+    if (name == "firstElementChild") {
+        if (node_->children.empty()) {
+            return v8::Null(isolate);
+        }
+        return document_->wrap_element(isolate, context, node_->children.front());
+    }
+    if (name == "lastElementChild") {
+        if (node_->children.empty()) {
+            return v8::Null(isolate);
+        }
+        return document_->wrap_element(isolate, context, node_->children.back());
+    }
+    if (name == "childElementCount") {
+        return v8::Integer::New(isolate,
+                                static_cast<std::int32_t>(node_->children.size()));
     }
     return v8::Undefined(isolate);
 }
