@@ -1121,9 +1121,11 @@ public:
             node_->tag == "option") {
             names.push_back("value");
         }
-        // M5-5: `selected` (read-write bool) is exposed only on <option>.
+        // M5-5: `selected` (read-write bool) is exposed only on <option>;
+        // M5-8: `text` (read-only text content) too.
         if (node_->tag == "option") {
             names.push_back("selected");
+            names.push_back("text");
         }
         // M5-7: `checked` (read-write bool) is exposed only on <input>.
         if (node_->tag == "input") {
@@ -1787,6 +1789,12 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     // M5-7: input.checked — the runtime bool slot (exposed only on <input>).
     if (name == "checked") {
         return v8::Boolean::New(isolate, node_->checked);
+    }
+    // M5-8: option.text — the option's current text content (read-only, exposed only
+    // on <option>; live, so it follows textContent writes). Unlike option.value it
+    // ignores the `value` attribute and always reflects the text.
+    if (name == "text") {
+        return v8_string(isolate, node_->text_content);
     }
     return v8::Undefined(isolate);
 }

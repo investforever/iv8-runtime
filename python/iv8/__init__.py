@@ -478,6 +478,19 @@ no ``defaultChecked`` / ``indeterminate`` / ``type`` distinction, and no
 independent of tree position / form ownership, and is orthogonal to ``input.value``.
 No new Python API / top-level object / exception.
 
+M5-8 (option text) adds a read-only ``text`` string property exposed **only on
+``<option>`` elements**: it returns the option's current **text content** (empty →
+``""``), computed live on each read (it follows ``textContent`` writes; there is no
+own slot). Unlike ``option.value`` it always reflects the text and ignores the
+``value`` attribute — so an option **without** a ``value`` attribute has
+``option.value === option.text`` (both track the text), while one **with** a
+``value`` attribute may differ (``value`` from the attribute, ``text`` from the
+content). ``option.text`` is read-only (no ``option.text = ...``), works on a
+detached ``<option>``, and is unaffected by tree editing / form ownership. Still
+**no** ``option.label`` / ``option.index`` / ``defaultSelected`` /
+``select.options`` / ``selectedIndex`` / ``optgroup`` / ``HTMLOptionElement``, and
+no other element's ``.text``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
