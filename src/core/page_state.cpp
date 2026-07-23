@@ -370,6 +370,11 @@ struct DomNode {
     // the fields, everything else to this table). Duplicate names: last wins.
     std::unordered_map<std::string, std::string> attributes;
     std::string text_content;          // M2-7 aggregate text (precomputed)
+    // M5-3 <input>.value runtime slot. Initialized ONCE from the `value` attribute
+    // at parse/create time, then decoupled: input.value = ... writes here only (not
+    // the attribute), and setAttribute('value', ...) does not touch this. Only ever
+    // meaningful for <input> (the property is exposed only there).
+    std::string value;
     DomNode* parent = nullptr;         // owning parent element, or null (root)
     std::vector<DomNode*> children;    // owned by the DocumentHost node pool
     std::size_t content_start = 0;     // [start,end) of inner HTML in the source
@@ -561,6 +566,14 @@ void parse_html(const std::string& html,
         node->content_start = i;   // just past '>'
         node->content_end = i;     // default empty; set when the end tag closes it
         parse_attributes(body, *node);
+        // M5-3: seed <input>.value once from the parsed `value` attribute (absent
+        // -> ""). Thereafter the runtime .value slot is decoupled from the attr.
+        if (tag == "input") {
+            const auto vit = node->attributes.find("value");
+            if (vit != node->attributes.end()) {
+                node->value = vit->second;
+            }
+        }
         DomNode* raw = node.get();
         pool.push_back(std::move(node));
         if (stack.empty()) {
@@ -1055,6 +1068,10 @@ public:
             node_->tag == "select" || node_->tag == "textarea") {
             names.push_back("form");
         }
+        // M5-3: `value` (read-write text value) is exposed only on <input>.
+        if (node_->tag == "input") {
+            names.push_back("value");
+        }
         return names;
     }
     std::vector<std::string> method_names() const override {
@@ -1075,9 +1092,13 @@ public:
         names.insert(names.end(), events.begin(), events.end());
         return names;
     }
-    // M2-8: textContent is writable (element.textContent = ...).
+    // M2-8: textContent is writable; M5-3: <input>.value is writable too.
     std::vector<std::string> writable_property_names() const override {
-        return {"textContent"};
+        std::vector<std::string> names = {"textContent"};
+        if (node_->tag == "input") {
+            names.push_back("value");
+        }
+        return names;
     }
 
     v8::Local<v8::Value> get_property(v8::Isolate* isolate,
@@ -1655,6 +1676,14 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
         }
         return v8::Null(isolate);
     }
+    // M5-3: input.value — the runtime value slot (exposed only on <input>, see
+    // property_names). Read returns the current slot; the slot is seeded once from
+    // the `value` attribute at parse/create time and is otherwise decoupled from
+    // the attribute. Minimal: no type distinction, no sanitization, no
+    // defaultValue/checked/selection.
+    if (name == "value") {
+        return v8_string(isolate, node_->value);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1664,22 +1693,30 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
 // no longer see the removed nodes; no separate index needs updating.
 void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> context,
                                const std::string& name, v8::Local<v8::Value> value) {
-    if (name != "textContent") {
-        return;  // only textContent is writable
+    if (name != "textContent" && name != "value") {
+        return;  // only textContent (M2-8) and <input>.value (M5-3) are writable
     }
-    std::string text;
+    std::string str_value;
     v8::Local<v8::String> str;
     if (value->ToString(context).ToLocal(&str)) {
         v8::String::Utf8Value utf8(isolate, str);
         if (*utf8 != nullptr) {
-            text.assign(*utf8, static_cast<std::size_t>(utf8.length()));
+            str_value.assign(*utf8, static_cast<std::size_t>(utf8.length()));
         }
     }
+    // M5-3: input.value = ... writes the runtime slot only (does NOT touch the
+    // `value` attribute). "value" is writable only on <input> (writable_property_
+    // names gates it), so a non-input never reaches here with name == "value".
+    if (name == "value") {
+        node_->value = str_value;
+        return;
+    }
+    // M2-8: textContent = ... replaces all children with the given text.
     for (DomNode* child : node_->children) {
         child->parent = nullptr;
     }
     node_->children.clear();
-    node_->text_content = text;
+    node_->text_content = str_value;
 }
 
 v8::Local<v8::Value> ElementHost::call_method(
