@@ -1133,7 +1133,9 @@ public:
         return {"URL",  "title",           "readyState",  "documentElement",
                 "head", "body",            "currentScript", "scripts",
                 // M4-B-6 document's direct element children.
-                "children"};
+                "children",
+                // M4-B-7 all <form> elements in the current tree.
+                "forms"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1194,6 +1196,13 @@ public:
             // as document.scripts / query collections (no HTMLCollection, no
             // identity guarantee).
             return elements_array(isolate, context, roots_);
+        }
+        if (name == "forms") {  // M4-B-7: all <form> elements in the current tree
+            // Same live-tree collection + plain-Array wrapping as
+            // getElementsByTagName('form') (shared elements_by_tag): whole tree,
+            // document order, detached <form>s excluded. <form> is treated as a
+            // plain element — no HTMLFormElement / submit / elements association.
+            return elements_array(isolate, context, elements_by_tag("form"));
         }
         return v8::Undefined(isolate);
     }

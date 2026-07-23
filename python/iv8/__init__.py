@@ -288,6 +288,17 @@ queries, reflects the live tree, and a top-level ``<script>`` would appear yet s
 inert. No ``document.childNodes`` / ``firstChild`` / ``lastChild``, no new Python API
 / top-level object / exception.
 
+M4-B-7 (document form collection) adds the read-only ``document.forms``: a plain JS
+``Array`` of every ``<form>`` element in the current tree, in document order
+(recollected live per read; empty → ``[]``), using the same collector as
+``getElementsByTagName('form')`` — so a detached ``<form>`` is excluded and the two
+agree. Like the other collections it is **not** an ``HTMLCollection`` (no ``item()``
+/ ``namedItem()``) and carries no array/wrapper identity guarantee (read by
+``.length`` / ``.id`` / ``.tagName``). A ``<form>`` is treated as a plain element:
+**no** ``HTMLFormElement`` / ``form.elements`` / ``submit()`` / ``requestSubmit()`` /
+``reset()`` / ``FormData`` / control association, and no ``document.images`` /
+``links`` / ``anchors``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
