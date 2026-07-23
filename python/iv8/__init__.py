@@ -347,6 +347,17 @@ by ``.length`` / ``.id`` / ``.tagName``). An ``<embed>`` is treated as a plain
 reflection, events / playback / sizing, ``HTMLEmbedElement``, or
 ``document.plugins``. No new Python API / top-level object / exception.
 
+M4-B-12 (document applet collection) adds the read-only ``document.applets``: a
+plain JS ``Array`` of every ``<applet>`` element in the current tree, in document
+order (recollected live per read; empty → ``[]``), using the same collector as
+``getElementsByTagName('applet')`` — so a detached ``<applet>`` is excluded and the
+two agree. Like the other collections it is **not** an ``HTMLCollection`` (no
+``item()`` / ``namedItem()``) and carries no array/wrapper identity guarantee (read
+by ``.length`` / ``.id`` / ``.tagName``). An ``<applet>`` is treated as a plain
+element: **no** plugin / Java / media / network, no ``.code`` / ``.archive`` /
+``.object`` reflection, no events / playback / sizing, no ``HTMLAppletElement``, and
+no ``document.plugins``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

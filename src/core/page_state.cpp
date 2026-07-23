@@ -1143,7 +1143,9 @@ public:
                 // M4-B-10 <a> elements that carry a name attribute.
                 "anchors",
                 // M4-B-11 all <embed> elements in the current tree.
-                "embeds"};
+                "embeds",
+                // M4-B-12 all <applet> elements in the current tree.
+                "applets"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1249,6 +1251,13 @@ public:
             // element — no plugin/media loading, network, .src/.type reflection,
             // events, or HTMLEmbedElement; no document.plugins.
             return elements_array(isolate, context, elements_by_tag("embed"));
+        }
+        if (name == "applets") {  // M4-B-12: all <applet> elements in the current tree
+            // Same live-tree collector as getElementsByTagName('applet'): whole
+            // tree, document order, detached <applet>s excluded. <applet> is a plain
+            // element — no plugin/Java/media/network, no .code/.archive/.object
+            // reflection, no events/playback/sizing, no HTMLAppletElement.
+            return elements_array(isolate, context, elements_by_tag("applet"));
         }
         return v8::Undefined(isolate);
     }

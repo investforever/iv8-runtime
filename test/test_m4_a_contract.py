@@ -62,11 +62,11 @@ def test_js_document_surface_not_exceeded():
                        "getElementsByTagName", "createElement"):
             assert page.eval(f"typeof document.{member}") == "function"
         # ... and nothing beyond them leaked. (document.forms/images/links/anchors/
-        # embeds arrived in M4-B-7..11; applets / plugins stay out.)
+        # embeds/applets arrived in M4-B-7..12; plugins / all stay out.)
         for member in ("getElementsByClassName", "getElementsByName",
                        "createElementNS", "createTextNode", "createComment",
                        "createDocumentFragment", "importNode", "adoptNode",
-                       "write", "applets", "plugins"):
+                       "write", "plugins", "all"):
             assert page.eval(f"typeof document.{member}") == "undefined"
         # A query collection is a plain Array — no HTMLCollection extras.
         assert page.eval("Array.isArray(document.querySelectorAll('div'))") is True

@@ -58,11 +58,11 @@ def test_js_document_surface_not_exceeded():
                   base_url=BASE)
         # (M4-A-1 added document.querySelectorAll / getElementsByTagName / head;
         # M4-A-2 added document.createElement; these remain out of scope.)
-        # (document.forms/images/links/anchors/embeds arrived in M4-B-7..11 — see
-        # their test files.)
+        # (document.forms/images/links/anchors/embeds/applets arrived in
+        # M4-B-7..12 — see their test files.)
         for member in ("getElementsByClassName", "createElementNS",
                        "createTextNode", "createComment", "write",
-                       "onreadystatechange", "applets", "plugins"):
+                       "onreadystatechange", "plugins", "all"):
             assert page.eval(f"typeof document.{member}") == "undefined"
         # document.scripts is a plain Array — no HTMLCollection extras.
         assert page.eval("Array.isArray(document.scripts)") is True
