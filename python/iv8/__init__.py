@@ -384,8 +384,22 @@ an ``HTMLFormControlsCollection`` (no ``item()`` / ``namedItem()``) and carries 
 array/wrapper identity guarantee (read by ``.length`` / ``.id`` / ``.tagName``). It
 works on a detached ``<form>``. Still **no** ``HTMLFormElement`` / ``form.submit()``
 / ``requestSubmit()`` / ``reset()`` / ``FormData`` / ``form.length`` / ``form.name``
-/ ``form.action`` / ``form.method`` / control ``.form`` back-reference / validation
-/ radio-group semantics. No new Python API / top-level object / exception.
+/ ``form.action`` / ``form.method`` / validation / radio-group semantics. No new
+Python API / top-level object / exception.
+
+M5-2 (control owner-form) adds a read-only ``form`` property exposed **only on the
+four form controls** (``input`` / ``button`` / ``select`` / ``textarea``; other
+elements have no ``.form``): it returns the control's **nearest ancestor ``<form>``**
+(walking ``parentNode`` upward), or ``null`` when the control is not inside any
+form. It is pure ancestor-chain semantics over the live tree, recomputed per read —
+so it follows tree edits / reparent at once and, inside a **detached** ``<form>``
+subtree, returns that detached form (a control in a detached non-form subtree →
+``null``). It is self-consistent with ``form.elements`` (a control in a form's
+subtree has that form among its ancestors). Still **no** ``form=""`` cross-tree
+association, no ``HTMLFormElement`` / specialized control classes, no ``name`` /
+``value`` / ``type`` / ``submit()`` / validation, and no ``.form`` on
+``fieldset`` / ``output`` / ``object`` / custom elements. No new Python API /
+top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

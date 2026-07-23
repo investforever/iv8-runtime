@@ -1050,6 +1050,11 @@ public:
         if (node_->tag == "form") {
             names.push_back("elements");
         }
+        // M5-2: `form` (owner-form) is exposed only on the four form controls.
+        if (node_->tag == "input" || node_->tag == "button" ||
+            node_->tag == "select" || node_->tag == "textarea") {
+            names.push_back("form");
+        }
         return names;
     }
     std::vector<std::string> method_names() const override {
@@ -1635,6 +1640,20 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
                          },
                          out);
         return document_->elements_array(isolate, context, out);
+    }
+    // M5-2: control.form — the nearest ancestor <form> (walking parentNode), or null
+    // (exposed only on input/button/select/textarea, see property_names). Pure
+    // ancestor-chain semantics over the live tree, so it follows tree edits and
+    // works inside a detached <form> subtree; NOT the full HTML owner-form algorithm
+    // (no form="" cross-tree association).
+    if (name == "form") {
+        for (DomNode* ancestor = node_->parent; ancestor != nullptr;
+             ancestor = ancestor->parent) {
+            if (ancestor->tag == "form") {
+                return document_->wrap_element(isolate, context, ancestor);
+            }
+        }
+        return v8::Null(isolate);
     }
     return v8::Undefined(isolate);
 }
