@@ -267,6 +267,18 @@ participates yet stays inert. No ``webkitClosest`` / ``document.closest`` / extr
 ancestor API, no complex selectors, no new Python API / top-level object /
 exception.
 
+M4-B-5 (element child collection) pins the contract of ``element.children`` — which
+has existed since M2-6 (``childNodes === children`` in this text-node-free model)
+and gains **no** new runtime behaviour this phase. It is a plain JS ``Array`` of the
+element's direct element children in storage order (empty → ``[]``); it is **not**
+an ``HTMLCollection`` (no ``item()`` / ``namedItem()``) and has no array/wrapper
+identity guarantee (read it by ``.length`` / ``.id`` / ``.tagName``, never by
+``===``). It is live (reflects M4-A-3 edits), readable on a detached subtree, and
+self-consistent with ``childElementCount`` / ``firstElementChild`` /
+``lastElementChild``; a ``<script>`` child is visible yet inert. No
+``document.children`` / ``firstChild`` / ``lastChild``, no new Python API /
+top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
