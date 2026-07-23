@@ -412,9 +412,24 @@ change the current ``.value``. It is a minimal text model — all ``type``s shar
 string value, with **no** sanitization / ``defaultValue`` / dirty-flag /
 ``checked`` / selection / ``input``&``change`` events. It works on a detached
 ``<input>`` and is independent of tree position / form ownership. Still **no**
-``textarea`` / ``select`` / ``button`` / ``option`` ``.value``, no
+``select`` / ``button`` / ``option`` ``.value``, no
 ``valueAsNumber`` / ``files`` / validation / specialized ``HTMLInputElement``. No
 new Python API / top-level object / exception.
+
+M5-4 (textarea value) extends the read-write ``value`` string property to
+``<textarea>`` elements (in addition to ``<input>``; still no other element has
+``.value``). It behaves exactly like ``input.value`` except for its **seed source**:
+a ``<textarea>``'s runtime value slot is seeded once from its **initial text
+content** (`<textarea>abc</textarea>` → ``"abc"``; empty → ``""``; a fresh
+``createElement('textarea')`` → ``""``), then **decoupled**: ``textarea.value = ...``
+does **not** change ``textContent``, ``textarea.textContent = ...`` does **not**
+change the current ``.value``, and ``setAttribute(...)`` does not participate. Same
+minimal text model (no selection / ``input``&``change`` events / ``defaultValue`` /
+dirty-flag / newline normalization / ``placeholder`` / ``disabled`` / ``readonly`` /
+specialized ``HTMLTextAreaElement``); works on a detached ``<textarea>`` and is
+independent of tree position / form ownership. Still **no** ``select`` /
+``button`` / ``option`` ``.value``. No new Python API / top-level object /
+exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

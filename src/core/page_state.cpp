@@ -619,6 +619,11 @@ void parse_html(const std::string& html,
             node->text_content = strip_tags(html.substr(
                 node->content_start, node->content_end - node->content_start));
         }
+        // M5-4: seed <textarea>.value once from its initial text content (empty ->
+        // ""). Thereafter the runtime .value slot is decoupled from textContent.
+        if (node->tag == "textarea") {
+            node->value = node->text_content;
+        }
     }
 }
 
@@ -1068,8 +1073,9 @@ public:
             node_->tag == "select" || node_->tag == "textarea") {
             names.push_back("form");
         }
-        // M5-3: `value` (read-write text value) is exposed only on <input>.
-        if (node_->tag == "input") {
+        // M5-3 / M5-4: `value` (read-write text value) is exposed on <input> and
+        // <textarea>.
+        if (node_->tag == "input" || node_->tag == "textarea") {
             names.push_back("value");
         }
         return names;
@@ -1092,10 +1098,10 @@ public:
         names.insert(names.end(), events.begin(), events.end());
         return names;
     }
-    // M2-8: textContent is writable; M5-3: <input>.value is writable too.
+    // M2-8: textContent is writable; M5-3/M5-4: <input>/<textarea>.value too.
     std::vector<std::string> writable_property_names() const override {
         std::vector<std::string> names = {"textContent"};
-        if (node_->tag == "input") {
+        if (node_->tag == "input" || node_->tag == "textarea") {
             names.push_back("value");
         }
         return names;
@@ -1676,10 +1682,11 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
         }
         return v8::Null(isolate);
     }
-    // M5-3: input.value — the runtime value slot (exposed only on <input>, see
-    // property_names). Read returns the current slot; the slot is seeded once from
-    // the `value` attribute at parse/create time and is otherwise decoupled from
-    // the attribute. Minimal: no type distinction, no sanitization, no
+    // M5-3/M5-4: value — the runtime value slot (exposed only on <input> and
+    // <textarea>, see property_names). Read returns the current slot; the slot is
+    // seeded once at parse/create time (<input> from its `value` attribute,
+    // <textarea> from its initial text content) and is otherwise decoupled from the
+    // attribute / textContent. Minimal: no type distinction, no sanitization, no
     // defaultValue/checked/selection.
     if (name == "value") {
         return v8_string(isolate, node_->value);
