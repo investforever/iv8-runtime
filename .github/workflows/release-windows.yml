@@ -28,20 +28,42 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-      - name: Cache V8 monolith (windows)
+      # Restore with a one-shot retry: a transient cache-service 404 is reported as
+      # a non-retryable MISS and would trigger a needless ~40-min rebuild. Retry the
+      # restore once before building; save only after a real build. See
+      # release-linux.yml. Keys/paths unchanged.
+      - name: Restore V8 monolith cache (attempt 1)
         id: v8cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/v8
           key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
-      - name: Fetch + build V8 monolith (cache miss only)
+      - name: Pause before cache retry
         if: steps.v8cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: sleep 30
+      - name: Restore V8 monolith cache (attempt 2 — beat transient 404s)
+        id: v8cache2
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
+      - name: Fetch + build V8 monolith (only if truly absent)
+        id: v8build
+        if: steps.v8cache.outputs.cache-hit != 'true' && steps.v8cache2.outputs.cache-hit != 'true'
         shell: cmd
         env:
           WORK: C:\v8
         run: |
           call tools\fetch_v8_windows.bat || exit /b 1
           call tools\build_v8_windows.bat || exit /b 1
+      - name: Save V8 monolith cache (only after a real build)
+        if: steps.v8build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
 
   wheels:
     needs: build-v8
@@ -52,12 +74,32 @@ jobs:
         python: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
-      - name: Restore V8 monolith (cache)
-        uses: actions/cache@v4
+      # Restore-only (build-v8 populated it). One-shot retry so a transient cache
+      # 404 doesn't hard-fail the wheel build; if the cache is genuinely absent
+      # after the retry, fail with a clear message (was fail-on-cache-miss: true).
+      - name: Restore V8 monolith (cache, attempt 1)
+        id: v8cache
+        uses: actions/cache/restore@v4
         with:
           path: data/v8
           key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
-          fail-on-cache-miss: true
+      - name: Pause before cache retry
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: sleep 30
+      - name: Restore V8 monolith (cache, attempt 2 — beat transient 404s)
+        id: v8cache2
+        if: steps.v8cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/v8
+          key: v8-win-x64-${{ hashFiles('tools/fetch_v8_windows.bat', 'tools/build_v8_windows.bat', 'cmake/v8_pin.cmake') }}
+      - name: Fail if V8 cache is absent after retry
+        if: steps.v8cache.outputs.cache-hit != 'true' && steps.v8cache2.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "::error::V8 monolith cache missing after retry (build-v8 should have populated it)."
+          exit 1
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
