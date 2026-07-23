@@ -35,34 +35,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # V8 monolith restore with a one-shot retry. A transient GitHub cache-service
-      # error (observed: "GetCacheEntryDownloadURL: (404) workflow run not found")
-      # is reported by actions/cache as a non-retryable MISS even though the cache
-      # is present, which would trigger a needless ~40-min V8 rebuild. Retry the
-      # restore once (after a short pause) before deciding to build; save only after
-      # a real build. Keys/paths are unchanged.
-      - name: Restore V8 monolith cache (attempt 1)
+      # V8 monolith restore with retries (up to 4 attempts). A transient GitHub
+      # cache-service error ("GetCacheEntryDownloadURL: (404) workflow run not
+      # found") is reported by actions/cache as a non-retryable MISS even though the
+      # cache is present, which would trigger a needless ~40-min V8 rebuild. The
+      # composite action retries the restore before we decide to build; save only
+      # after a real build. Keys/paths are unchanged.
+      - name: Restore V8 monolith cache (with retries)
         id: v8cache
-        uses: actions/cache/restore@v4
-        with:
-          path: data/v8
-          key: v8-manylinux2_28-${{ hashFiles('tools/build_v8_manylinux.sh', 'cmake/v8_pin.cmake') }}
-
-      - name: Pause before cache retry
-        if: steps.v8cache.outputs.cache-hit != 'true'
-        run: sleep 30
-
-      - name: Restore V8 monolith cache (attempt 2 — beat transient 404s)
-        id: v8cache2
-        if: steps.v8cache.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@v4
+        uses: ./.github/actions/restore-v8-cache
         with:
           path: data/v8
           key: v8-manylinux2_28-${{ hashFiles('tools/build_v8_manylinux.sh', 'cmake/v8_pin.cmake') }}
 
       - name: Build V8 monolith in manylinux container (only if truly absent)
         id: v8build
-        if: steps.v8cache.outputs.cache-hit != 'true' && steps.v8cache2.outputs.cache-hit != 'true'
+        if: steps.v8cache.outputs.cache-hit != 'true'
         run: |
           docker run --rm -v "$PWD":/io "$MANYLINUX_IMAGE" \
             bash /io/tools/build_v8_manylinux.sh

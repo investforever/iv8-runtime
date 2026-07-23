@@ -1,0 +1,70 @@
+name: Restore V8 monolith cache (with retries)
+description: >
+  Restore the cached V8 monolith, retrying transient GitHub cache-service failures
+  (observed: "GetCacheEntryDownloadURL: (404) workflow run not found", reported by
+  actions/cache as a NON-retryable miss) before the caller gives up and rebuilds
+  (~40 min). Up to 4 restore attempts with a pause between them; a genuine miss
+  after all attempts just costs ~3 pauses before the caller's fallback. Restore
+  only — the caller decides whether to build and save. Requires the repo to be
+  checked out first (this is a local composite action).
+
+inputs:
+  path:
+    description: Cache path (must match the paired save).
+    required: true
+  key:
+    description: Cache key (must match the paired save).
+    required: true
+  pause:
+    description: Seconds to wait between attempts.
+    required: false
+    default: '30'
+
+outputs:
+  cache-hit:
+    description: Whether any attempt restored the cache (string true/false).
+    value: ${{ steps.a1.outputs.cache-hit == 'true' || steps.a2.outputs.cache-hit == 'true' || steps.a3.outputs.cache-hit == 'true' || steps.a4.outputs.cache-hit == 'true' }}
+
+runs:
+  using: composite
+  steps:
+    - id: a1
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+
+    - if: steps.a1.outputs.cache-hit != 'true'
+      shell: bash
+      run: sleep ${{ inputs.pause }}
+    - id: a2
+      if: steps.a1.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+
+    - if: steps.a1.outputs.cache-hit != 'true' && steps.a2.outputs.cache-hit != 'true'
+      shell: bash
+      run: sleep ${{ inputs.pause }}
+    - id: a3
+      if: steps.a1.outputs.cache-hit != 'true' && steps.a2.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+
+    - if: steps.a1.outputs.cache-hit != 'true' && steps.a2.outputs.cache-hit != 'true' && steps.a3.outputs.cache-hit != 'true'
+      shell: bash
+      run: sleep ${{ inputs.pause }}
+    - id: a4
+      if: steps.a1.outputs.cache-hit != 'true' && steps.a2.outputs.cache-hit != 'true' && steps.a3.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}
+
+    - name: Report cache outcome
+      shell: bash
+      run: |
+        echo "restore attempts: a1=${{ steps.a1.outputs.cache-hit }} a2=${{ steps.a2.outputs.cache-hit }} a3=${{ steps.a3.outputs.cache-hit }} a4=${{ steps.a4.outputs.cache-hit }}"
