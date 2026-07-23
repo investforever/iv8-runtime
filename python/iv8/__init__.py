@@ -515,8 +515,24 @@ checked>` → ``true``; no ``checked`` attribute / a fresh ``createElement('inpu
 ``removeAttribute('checked')`` do **not** change it. It is exactly the value
 ``form.reset()`` restores ``.checked`` to. Works on a detached ``<input>``; a
 repeated ``load()`` / ``createElement`` establishes each new node's own baseline.
-Still **no** ``option.defaultSelected`` / ``defaultValue`` / a writable default /
-specialized ``HTMLInputElement``. No new Python API / top-level object / exception.
+Still **no** ``defaultValue`` / a writable default / specialized
+``HTMLInputElement``. No new Python API / top-level object / exception.
+
+M6-3 (option default-selected) adds a read-only ``defaultSelected`` boolean property
+exposed **only on ``<option>`` elements** (no other element has it). It returns the
+option's fixed **reset baseline** selected value — the M6-1 initial snapshot, taken
+**after** the M5-5 single-select normalization: `<option selected>` is usually
+``true``, but if several options under one ``<select>`` were initially selected,
+only the document-order-first has ``defaultSelected === true`` and the rest
+``false``; a fresh ``createElement('option')`` → ``false``. It is read-only and
+**fixed**: it does not follow the live ``option.selected``, and
+``option.selected = ...`` / ``setAttribute`` / ``removeAttribute('selected')`` do
+**not** change it. It is exactly the value ``form.reset()`` restores
+``option.selected`` to (and thereby ``select.value``, which is derived). Works on a
+detached ``<option>``; a repeated ``load()`` / ``createElement`` establishes each
+new node's own baseline. Still **no** ``selectedIndex`` / ``select.options`` /
+``multiple`` / ``option.label`` / ``defaultValue`` / specialized
+``HTMLOptionElement``. No new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

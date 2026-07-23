@@ -1130,10 +1130,12 @@ public:
             names.push_back("value");
         }
         // M5-5: `selected` (read-write bool) is exposed only on <option>;
-        // M5-8: `text` (read-only text content) too.
+        // M5-8: `text` (read-only) too; M6-3: `defaultSelected` (read-only reset
+        // baseline) too.
         if (node_->tag == "option") {
             names.push_back("selected");
             names.push_back("text");
+            names.push_back("defaultSelected");
         }
         // M5-7: `checked` (read-write bool) is exposed only on <input>;
         // M6-2: `defaultChecked` (read-only reset baseline) too.
@@ -1818,6 +1820,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     // form.reset() restores .checked to.
     if (name == "defaultChecked") {
         return v8::Boolean::New(isolate, node_->initial_checked);
+    }
+    // M6-3: option.defaultSelected — the fixed reset baseline (M6-1 initial_selected,
+    // captured AFTER the M5-5 single-select normalization), read-only, exposed only
+    // on <option>. Does not follow live .selected; it is what form.reset() restores
+    // .selected to.
+    if (name == "defaultSelected") {
+        return v8::Boolean::New(isolate, node_->initial_selected);
     }
     // M5-8: option.text — the option's current text content (read-only, exposed only
     // on <option>; live, so it follows textContent writes). Unlike option.value it

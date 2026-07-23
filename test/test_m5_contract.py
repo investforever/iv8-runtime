@@ -105,8 +105,9 @@ def test_frozen_items_absent():
         # — see test_input_default_checked.py.)
         for m in ("defaultValue", "type", "disabled"):
             assert page.eval(f"typeof document.getElementById('in').{m}") == "undefined"
-        # option: no label / index / defaultSelected
-        for m in ("label", "index", "defaultSelected"):
+        # option: no label / index. (defaultSelected arrived in M6-3 — see
+        # test_option_default_selected.py.)
+        for m in ("label", "index"):
             assert page.eval(f"typeof document.getElementById('op').{m}") == "undefined"
         # button: no type / disabled
         for m in ("type", "disabled"):
