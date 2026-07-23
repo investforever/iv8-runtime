@@ -311,6 +311,19 @@ element: **no** ``HTMLImageElement`` / ``.src`` / ``.naturalWidth`` / ``.complet
 no ``document.embeds`` / ``applets``. No new Python API / top-level object /
 exception.
 
+M4-B-9 (document link collection) adds the read-only ``document.links``: a plain JS
+``Array`` of the ``<a>`` and ``<area>`` elements in the current tree that **carry an
+``href`` attribute** (presence only — a valueless ``href`` counts; those without one
+are excluded), in document order (recollected live per read; empty → ``[]``). Like
+the other collections it is **not** an ``HTMLCollection`` (no ``item()`` /
+``namedItem()``) and carries no array/wrapper identity guarantee (read by
+``.length`` / ``.id`` / ``.tagName`` / ``getAttribute('href')``). A detached match is
+excluded, and it reuses the M3-8 / M4-A-4 attribute model. ``<a>`` / ``<area>`` stay
+plain elements: **no** navigation, no ``.href`` URL reflection, no ``click`` default
+behaviour, no ``target`` / ``rel`` / ``download`` / ``ping`` semantics, and no
+``HTMLAnchorElement`` / ``HTMLAreaElement``. No new Python API / top-level object /
+exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

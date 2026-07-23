@@ -1137,7 +1137,9 @@ public:
                 // M4-B-7 all <form> elements in the current tree.
                 "forms",
                 // M4-B-8 all <img> elements in the current tree.
-                "images"};
+                "images",
+                // M4-B-9 <a>/<area> elements that carry an href attribute.
+                "links"};
     }
     std::vector<std::string> method_names() const override {
         // M2-6 document methods + M4-A-1 static queries + M4-A-2 createElement +
@@ -1211,6 +1213,19 @@ public:
             // document order, detached <img>s excluded. <img> is a plain element —
             // no HTMLImageElement / .src / loading / decoding / events / network.
             return elements_array(isolate, context, elements_by_tag("img"));
+        }
+        if (name == "links") {  // M4-B-9: <a>/<area> elements carrying an href attr
+            // Same live-tree walk (collect over roots_, document order, detached
+            // excluded), filtered to <a>/<area> that have an "href" attribute
+            // (presence only — value irrelevant; a valueless href counts). Reuses
+            // the M3-8/M4-A-4 attribute model (href lives in node.attributes; names
+            // are lowercased). <a>/<area> stay plain elements — no navigation, no
+            // .href reflection, no target/rel/download semantics.
+            std::vector<DomNode*> nodes = collect([](const DomNode* n) {
+                return (n->tag == "a" || n->tag == "area") &&
+                       n->attributes.find("href") != n->attributes.end();
+            });
+            return elements_array(isolate, context, nodes);
         }
         return v8::Undefined(isolate);
     }
