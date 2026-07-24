@@ -408,6 +408,12 @@ struct DomNode {
     // attribute / createElement('form')), then decoupled from the attribute. Only
     // meaningful for <form>; form.reset() does NOT touch it.
     std::string target;
+    // M7-7 <form>.noValidate runtime bool: the form's validation-skip switch state.
+    // Seeded ONCE at parse/create from the PRESENCE of the `novalidate` boolean
+    // attribute (present -> true; absent / createElement('form') -> false), then
+    // decoupled from the attribute. Only meaningful for <form>; form.reset() does NOT
+    // touch it. Switch state only — no validation system is implemented.
+    bool no_validate = false;
     // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
     // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
     // not follow later attribute/textContent edits). reset() restores value /
@@ -1160,14 +1166,15 @@ public:
             "parentElement", "firstElementChild", "lastElementChild",
             "childElementCount"};
         // M5-1: `elements` is exposed only on <form> (so non-form elements have no
-        // `.elements` property at all). M7-3/M7-4/M7-5/M7-6: `method` / `action` /
-        // `enctype` / `target` (all read-write).
+        // `.elements` property at all). M7-3..7: `method` / `action` / `enctype` /
+        // `target` (string) + `noValidate` (bool) — all read-write.
         if (node_->tag == "form") {
             names.push_back("elements");
             names.push_back("method");
             names.push_back("action");
             names.push_back("enctype");
             names.push_back("target");
+            names.push_back("noValidate");
         }
         // M5-2: `form` (owner-form) is exposed only on the four form controls.
         if (node_->tag == "input" || node_->tag == "button" ||
@@ -1242,13 +1249,14 @@ public:
         if (node_->tag == "input") {
             names.push_back("checked");
         }
-        // M7-3/M7-4/M7-5/M7-6: form.method (normalized) / form.action (raw) /
-        // form.enctype (normalized) / form.target (raw) are all read-write.
+        // M7-3..7: form.method (normalized) / action (raw) / enctype (normalized) /
+        // target (raw) strings + noValidate (bool coercion) are all read-write.
         if (node_->tag == "form") {
             names.push_back("method");
             names.push_back("action");
             names.push_back("enctype");
             names.push_back("target");
+            names.push_back("noValidate");
         }
         return names;
     }
@@ -1340,6 +1348,8 @@ public:
             if (tit != node->attributes.end()) {
                 node->target = tit->second;
             }
+            // M7-7: novalidate is a boolean attribute — seed from its PRESENCE.
+            node->no_validate = node->attributes.count("novalidate") != 0;
         }
         // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
         // the fully-seeded, normalized value/selected/checked. Fixed thereafter
@@ -1964,6 +1974,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "target") {
         return v8_string(isolate, node_->target);
     }
+    // M7-7: form.noValidate — the current validation-skip switch state (bool),
+    // read-write, exposed only on <form>. Decoupled from the `novalidate` attribute
+    // (reading returns the runtime slot). Switch state only — no validation runs;
+    // submit()/requestSubmit() stay no-ops.
+    if (name == "noValidate") {
+        return v8::Boolean::New(isolate, node_->no_validate);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1983,6 +2000,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     // (does NOT write the `checked` attribute). Writable only on <input>.
     if (name == "checked") {
         node_->checked = value->BooleanValue(isolate);
+        return;
+    }
+    // M7-7: form.noValidate = ... — truthy/falsey -> bool, runtime slot only (does
+    // NOT write the `novalidate` attribute). Writable only on <form>.
+    if (name == "noValidate") {
+        node_->no_validate = value->BooleanValue(isolate);
         return;
     }
     if (name != "textContent" && name != "value" && name != "method" &&

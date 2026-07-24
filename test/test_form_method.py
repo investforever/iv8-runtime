@@ -41,8 +41,8 @@ def test_method_only_on_form():
         assert page.eval("typeof document.getElementById('f').method") == "string"
         for eid in ("in", "bt", "dv"):
             assert page.eval(f"typeof document.getElementById('{eid}').method") == "undefined"
-        # sibling metadata stays frozen (form.action M7-4, enctype M7-5, target M7-6)
-        for m in ("noValidate",):
+        # sibling metadata frozen (action M7-4, enctype M7-5, target M7-6, noValidate M7-7)
+        for m in ("encoding",):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
 
 

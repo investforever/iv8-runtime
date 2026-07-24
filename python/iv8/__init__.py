@@ -639,6 +639,21 @@ from the attribute** in both directions, and it is independent of ``form.method`
 ``form.noValidate`` / ``form.encoding`` alias / ``.target`` on any other element. No new
 Python API / top-level object / exception.
 
+M7-7 (form novalidate switch) adds a read-write **boolean** property ``form.noValidate``
+exposed **only on ``<form>`` elements**. It is seeded once at parse/create from the
+**presence** of the ``novalidate`` boolean attribute: ``<form novalidate>`` → ``True``;
+an absent attribute or ``createElement('form')`` → ``False``. Writing
+``form.noValidate = X`` stores the truthy/falsey coercion ``Boolean(X)``. Like the other
+form metadata it is **decoupled from the attribute** in both directions
+(``setAttribute`` / ``removeAttribute('novalidate')`` do not change it, and the property
+does not change ``getAttribute('novalidate')``), and it is independent of
+``form.method`` / ``form.action`` / ``form.enctype`` / ``form.target``. It is switch
+state only — **no** validation runs, reading or writing it triggers no submission
+behaviour (``submit()`` / ``requestSubmit()`` stay no-ops), and ``form.reset()`` does not
+touch it. Works on a detached ``<form>``. Still **no** ``form.encoding`` alias /
+``checkValidity()`` / ``reportValidity()`` / ``willValidate`` / ``.noValidate`` on any
+other element. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

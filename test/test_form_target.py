@@ -44,8 +44,8 @@ def test_target_only_on_form():
         assert page.eval("typeof document.getElementById('f').target") == "string"
         for eid in ("in", "bt", "dv"):
             assert page.eval(f"typeof document.getElementById('{eid}').target") == "undefined"
-        # sibling metadata stays frozen (encoding alias not provided)
-        for m in ("noValidate", "encoding"):
+        # sibling metadata stays frozen (noValidate M7-7; encoding alias not provided)
+        for m in ("encoding",):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
 
 

@@ -40,9 +40,9 @@ def test_forms_is_a_plain_array():
             assert page.eval(f"typeof document.forms.{member}") == "undefined"
         # <form> gains no form behaviour beyond the minimal entry points
         # (form.elements M5-1; reset() M6-1; submit() M7-1; requestSubmit() M7-2;
-        # method M7-3; action M7-4; enctype M7-5; target M7-6). No FormData /
-        # noValidate surface.
-        assert page.eval("typeof document.forms[0].noValidate") == "undefined"
+        # method M7-3; action M7-4; enctype M7-5; target M7-6; noValidate M7-7).
+        # No FormData / encoding-alias surface.
+        assert page.eval("typeof document.forms[0].encoding") == "undefined"
 
 
 # --- fresh document -> empty array ----------------------------------------------
