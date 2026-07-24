@@ -8,6 +8,7 @@
 #include <pybind11/pybind11.h>
 
 #include "iv8/host_object.h"
+#include "iv8/watch_registry.h"
 
 namespace iv8 {
 
@@ -91,6 +92,19 @@ public:
     // synchronous CDP responses are returned this phase.
     pybind11::list devtools_dispatch(const std::string& message);
 
+    // M9-2: register the set of watched host-method paths ("receiver.method",
+    // e.g. "document.querySelector") and enable recording. Deduped; an empty list
+    // is a valid "enabled, watches nothing" set. Replaces any prior set. The
+    // registration persists across load() (same Page's observation intent). Raises
+    // JSContextDisposedError after dispose(). Type validation is done in the
+    // Python facade before this is called.
+    void watch_apis(const std::vector<std::string>& paths);
+    // M9-2: return the accumulated call-hit records as a list of dicts
+    // ({"path", "resource_name", "type": "call"}) and clear the log (read-and-
+    // clear). Empty list if nothing was hit. Raises JSContextDisposedError after
+    // dispose().
+    pybind11::list read_watch_api_hits();
+
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the
     // page's host objects + global roots + timers into it. Used by the ctor and
@@ -131,6 +145,10 @@ private:
     // context teardown hook BEFORE the isolate is disposed.
     bool devtools_enabled_ = false;
     std::unique_ptr<DevToolsInspector> inspector_;
+    // M9-2 Page-level watch registry: outlives each generation (survives load), so
+    // watch_apis() registration persists. Each install_page points the current
+    // ContextState at it.
+    WatchRegistry watch_registry_;
 };
 
 }  // namespace iv8

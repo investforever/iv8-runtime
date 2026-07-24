@@ -26,5 +26,9 @@ void register_page(py::module_& module) {
         // M9-1 DevTools attach base (internal; public surface is Page.devtools_url()).
         .def("devtools_enable", &iv8::PageState::devtools_enable)
         .def("devtools_dispatch", &iv8::PageState::devtools_dispatch,
-             py::arg("message"));
+             py::arg("message"))
+        // M9-2 watch-apis record面 (internal; public surface is Page.watch_apis /
+        // Page.read_watch_api_hits — type validation done in the Python facade).
+        .def("watch_apis", &iv8::PageState::watch_apis, py::arg("paths"))
+        .def("read_watch_api_hits", &iv8::PageState::read_watch_api_hits);
 }

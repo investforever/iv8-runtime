@@ -24,6 +24,13 @@ namespace iv8 {
 
 namespace {
 
+// M9-2 forward declarations (definitions lower in this TU): the isolate->owning-
+// ContextState recovery, and the watch-hit recorder used by the host-method
+// dispatch points (some of which are defined above the recorder's definition).
+ContextState* state_from_isolate(v8::Isolate* isolate);
+void watch_record(v8::Isolate* isolate, const std::string& receiver,
+                  const std::string& method);
+
 // M2-1 framework probe: a neutral, native-backed host object used ONLY to
 // validate the Host Object Framework (installation, property getter plumbing,
 // method callback plumbing, lifetime binding). It is NOT a browser object and
@@ -1522,6 +1529,8 @@ public:
         v8::Isolate* isolate, v8::Local<v8::Context> context,
         const std::string& name,
         const v8::FunctionCallbackInfo<v8::Value>& args) override {
+        // M9-2: record the "document.<method>" call before dispatch.
+        watch_record(isolate, "document", name);
         // M3-3: addEventListener / removeEventListener / dispatchEvent first.
         v8::Local<v8::Value> event_result;
         if (handle_event_method(isolate, context, name, args, event_result)) {
@@ -2084,9 +2093,28 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     node_->text_content = str_value;
 }
 
+// M9-2: record a host-method call hit if the "receiver.method" path is watched.
+// Cheap no-op when watching is disabled (the common case): the enabled() check is
+// a lock-free atomic read, and the path string is built only when it may match.
+void watch_record(v8::Isolate* isolate, const std::string& receiver,
+                  const std::string& method) {
+    ContextState* state = state_from_isolate(isolate);
+    if (state == nullptr) {
+        return;
+    }
+    WatchRegistry* registry = state->watch_registry();
+    if (registry == nullptr || !registry->enabled()) {
+        return;
+    }
+    registry->maybe_record(receiver + "." + method);
+}
+
 v8::Local<v8::Value> ElementHost::call_method(
     v8::Isolate* isolate, v8::Local<v8::Context> context, const std::string& name,
     const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // M9-2: record the "<tag>.<method>" call before dispatch (covers event methods
+    // handled just below too, e.g. "script.getAttribute").
+    watch_record(isolate, node_->tag, name);
     // M3-3: addEventListener / removeEventListener / dispatchEvent first.
     v8::Local<v8::Value> event_result;
     if (handle_event_method(isolate, context, name, args, event_result)) {
@@ -2365,10 +2393,12 @@ void register_timer_callback(const v8::FunctionCallbackInfo<v8::Value>& info,
 }
 
 void set_timeout_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    watch_record(info.GetIsolate(), "window", "setTimeout");  // M9-2
     register_timer_callback(info, /*repeating=*/false);
 }
 
 void set_interval_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    watch_record(info.GetIsolate(), "window", "setInterval");  // M9-2
     register_timer_callback(info, /*repeating=*/true);
 }
 
@@ -2458,6 +2488,7 @@ constexpr v8::ExternalPointerTypeTag kWindowEventsTag =
 void window_event_method(const v8::FunctionCallbackInfo<v8::Value>& info,
                          const char* method_name) {
     v8::Isolate* isolate = info.GetIsolate();
+    watch_record(isolate, "window", method_name);  // M9-2
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
     auto* target = static_cast<EventTargetHost*>(
         info.Data().As<v8::External>()->Value(kWindowEventsTag));
@@ -3289,11 +3320,39 @@ py::list PageState::devtools_dispatch(const std::string& message) {
     return out;
 }
 
+void PageState::watch_apis(const std::vector<std::string>& paths) {
+    // Registration is a plain member operation (no V8), but a disposed page reuses
+    // the M1 error path (JSContextDisposedError).
+    if (state_->disposed()) {
+        throw ContextDisposedError();
+    }
+    watch_registry_.set_paths(paths);  // dedup + enable (replaces any prior set)
+}
+
+py::list PageState::read_watch_api_hits() {
+    if (state_->disposed()) {
+        throw ContextDisposedError();
+    }
+    py::list out;
+    for (const WatchHit& hit : watch_registry_.take_hits()) {  // read-and-clear
+        py::dict record;
+        record["path"] = hit.path;
+        record["resource_name"] = hit.resource_name;
+        record["type"] = "call";
+        out.append(record);
+    }
+    return out;
+}
+
 void PageState::install_page(const std::string& base_url,
                              const std::string& html) {
     bootstrap_ = PageBootstrap{html, base_url};
 
     state_ = std::make_shared<ContextState>();
+    // M9-2: point the new generation at the Page-level watch registry so its
+    // host-method dispatch points can record hits and eval() can stamp the current
+    // script's resource name. The registry itself outlives generations.
+    state_->set_watch_registry(&watch_registry_);
     // M3-3/M3-4: before this context's isolate is disposed, release the event-
     // listener Global handles (teardown ordering, mirroring timers). The hook
     // reads host_objects_ + window_events_ lazily at teardown time, so it sees

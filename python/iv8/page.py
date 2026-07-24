@@ -310,6 +310,40 @@ class Page:
             self._devtools = DevToolsServer(self._native.devtools_dispatch)
         return self._devtools.ws_url()
 
+    def watch_apis(self, paths) -> None:
+        """Register a set of host-method paths to record when page scripts call them.
+
+        ``paths`` is a ``list[str]`` of minimal dotted ``"receiver.method"`` paths —
+        ``"document.querySelector"``, ``"script.getAttribute"``,
+        ``"window.setTimeout"`` — naming a known host method. Duplicates are
+        deduped; an empty list is valid (enabled, watches nothing). Calling it
+        replaces any prior set and takes effect for subsequent script execution on
+        this ``Page``; the registration **persists across ``load()``** (the same
+        page's observation intent continues). This phase records **calls only** — no
+        breakpoints, no pause, no argument/return/stack capture, no wildcard/regex
+        paths, no property watches, and no JS-visible watch API. A non-``list`` or a
+        non-``str`` element raises ``TypeError`` (before any state changes); after
+        ``dispose()`` it raises ``JSContextDisposedError``.
+        """
+        if not isinstance(paths, list):
+            raise TypeError("paths must be a list")
+        for index, path in enumerate(paths):
+            if not isinstance(path, str):
+                raise TypeError(f"paths[{index}] must be a str")
+        self._native.watch_apis(paths)
+
+    def read_watch_api_hits(self) -> list:
+        """Return the recorded watch-API call hits and clear the log (read-and-clear).
+
+        Each hit is a ``dict`` with ``path`` (the watched ``"receiver.method"``
+        string that was hit), ``resource_name`` (the executing script's resource
+        name, or ``""`` if unattributed), and ``type`` (always ``"call"`` this
+        phase). Returns ``[]`` if nothing was hit. A subsequent call returns ``[]``
+        until new hits accumulate. Raises ``JSContextDisposedError`` after
+        ``dispose()``.
+        """
+        return self._native.read_watch_api_hits()
+
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""
         # M9-1: stop the DevTools server first (best-effort) so its port is freed;

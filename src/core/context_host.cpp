@@ -10,6 +10,7 @@
 #include "iv8/js_exception.h"
 #include "iv8/js_value.h"
 #include "iv8/value_converter.h"
+#include "iv8/watch_registry.h"
 
 namespace py = pybind11;
 
@@ -233,6 +234,24 @@ py::object ContextState::value_to_py(std::uint64_t id) {
 py::object ContextState::eval(const std::string& source, bool to_py,
                               const std::string& name) {
     OperationScope guard(*this);
+
+    // M9-2: stamp this script's resource name onto the watch registry for the
+    // duration of the run, so a watched host-method call made by this script is
+    // attributed to it. Save/restore handles any (future) nesting; no-op if the
+    // page has no watch registry.
+    struct WatchResourceGuard {
+        WatchRegistry* registry;
+        std::string previous;
+        ~WatchResourceGuard() {
+            if (registry != nullptr) {
+                registry->set_current_resource(previous);
+            }
+        }
+    } watch_guard{watch_, watch_ != nullptr ? watch_->current_resource()
+                                            : std::string()};
+    if (watch_ != nullptr) {
+        watch_->set_current_resource(name);
+    }
 
     v8::Isolate* isolate = isolate_host_->isolate();
     v8::Locker locker(isolate);

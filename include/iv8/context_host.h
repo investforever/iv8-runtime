@@ -17,6 +17,10 @@
 
 namespace iv8 {
 
+// M9-2 forward declaration; the full definition (header-only) lives in
+// iv8/watch_registry.h. ContextState only holds an observing pointer.
+class WatchRegistry;
+
 // Isolate embedder-data slot holding the owning ContextState* so host callbacks
 // (e.g. setTimeout) can reach it via isolate->GetData(). Each ContextState owns
 // its own isolate, so this slot is private to that context.
@@ -93,6 +97,12 @@ public:
         on_teardown_ = std::move(fn);
     }
 
+    // M9-2: point this generation at the Page-level watch registry (survives
+    // load). Host-method dispatch points reach it via state_from_isolate(); eval()
+    // stamps the current script's resource name onto it. Null on a bare JSContext.
+    void set_watch_registry(WatchRegistry* registry) { watch_ = registry; }
+    WatchRegistry* watch_registry() const { return watch_; }
+
     // Explicit dispose: rejects if an operation is active (ContextBusyError),
     // otherwise runs the ordered teardown.
     void dispose();
@@ -149,6 +159,10 @@ private:
     // M3-3 teardown hook (see set_on_teardown). Empty unless PageState installs
     // it; a bare JSContext leaves it unset.
     std::function<void()> on_teardown_;
+
+    // M9-2 observing pointer to the Page-level watch registry (owned by PageState,
+    // outlives each generation). Null unless PageState set it.
+    WatchRegistry* watch_ = nullptr;
 };
 
 // Thin per-JSContext owner: holds the shared state and delegates. This is the
