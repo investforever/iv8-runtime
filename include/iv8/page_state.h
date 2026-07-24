@@ -97,8 +97,11 @@ public:
     // is a valid "enabled, watches nothing" set. Replaces any prior set. The
     // registration persists across load() (same Page's observation intent). Raises
     // JSContextDisposedError after dispose(). Type validation is done in the
-    // Python facade before this is called.
-    void watch_apis(const std::vector<std::string>& paths);
+    // Python facade before this is called. M9-3: `break_on_hit` additionally
+    // schedules a V8 Inspector pause on each matched hit — but only when an
+    // Inspector session is attached (else it is recorded only; no error, no
+    // pause). Type validation is done in the Python facade.
+    void watch_apis(const std::vector<std::string>& paths, bool break_on_hit);
     // M9-2: return the accumulated call-hit records as a list of dicts
     // ({"path", "resource_name", "type": "call"}) and clear the log (read-and-
     // clear). Empty list if nothing was hit. Raises JSContextDisposedError after
@@ -115,6 +118,11 @@ private:
     // register `context`. Called from install_page (when devtools is enabled) and
     // from devtools_enable(); both already hold the isolate scope.
     void install_inspector(v8::Isolate* isolate, v8::Local<v8::Context> context);
+
+    // M9-3: request the current Inspector session to pause on the next statement
+    // (the watch-registry pause callback). A no-op when no session is attached, so
+    // break_on_hit records-only until an external DevTools client has connected.
+    void request_inspector_pause();
 
     // Minimal internal page root state captured by load() — the seed for a later
     // document bootstrap. Intentionally NOT exposed (no public document surface

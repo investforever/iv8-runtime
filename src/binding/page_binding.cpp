@@ -30,6 +30,7 @@ void register_page(py::module_& module) {
              py::arg("message"))
         // M9-2 watch-apis record面 (internal; public surface is Page.watch_apis /
         // Page.read_watch_api_hits — type validation done in the Python facade).
-        .def("watch_apis", &iv8::PageState::watch_apis, py::arg("paths"))
+        .def("watch_apis", &iv8::PageState::watch_apis, py::arg("paths"),
+             py::arg("break_on_hit"))
         .def("read_watch_api_hits", &iv8::PageState::read_watch_api_hits);
 }

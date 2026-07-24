@@ -3259,8 +3259,28 @@ struct DevToolsInspector {
 };
 
 PageState::PageState() {
+    // M9-3: the watch registry requests an Inspector pause through this Page (set
+    // once; the registry outlives no generation and is a member of this Page).
+    watch_registry_.set_pause_requester([this]() { request_inspector_pause(); });
     // Initial page state uses the fixed default base URL and empty document seed.
     install_page(kDefaultBaseUrl, std::string());
+}
+
+void PageState::request_inspector_pause() {
+    // 口径 1: without an attached Inspector session, break_on_hit records only —
+    // no pause, no error.
+    if (inspector_ == nullptr || !inspector_->session) {
+        return;
+    }
+    static const char kReason[] = "watch_apis";
+    // Schedule a pause at the next statement; when the Debugger domain is enabled
+    // on the session, the client observes Debugger.paused. Called on the isolate
+    // thread (a host method fired during script execution), so the session call is
+    // safe here.
+    inspector_->session->schedulePauseOnNextStatement(
+        v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kReason),
+                                 sizeof(kReason) - 1),
+        v8_inspector::StringView());
 }
 
 void PageState::install_inspector(v8::Isolate* isolate,
@@ -3320,13 +3340,15 @@ py::list PageState::devtools_dispatch(const std::string& message) {
     return out;
 }
 
-void PageState::watch_apis(const std::vector<std::string>& paths) {
+void PageState::watch_apis(const std::vector<std::string>& paths,
+                           bool break_on_hit) {
     // Registration is a plain member operation (no V8), but a disposed page reuses
     // the M1 error path (JSContextDisposedError).
     if (state_->disposed()) {
         throw ContextDisposedError();
     }
-    watch_registry_.set_paths(paths);  // dedup + enable (replaces any prior set)
+    // dedup + set break mode + enable (replaces any prior set).
+    watch_registry_.set_paths(paths, break_on_hit);
 }
 
 py::list PageState::read_watch_api_hits() {

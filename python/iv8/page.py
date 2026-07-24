@@ -310,7 +310,7 @@ class Page:
             self._devtools = DevToolsServer(self._native.devtools_dispatch)
         return self._devtools.ws_url()
 
-    def watch_apis(self, paths) -> None:
+    def watch_apis(self, paths, break_on_hit: bool = False) -> None:
         """Register a set of host-method paths to record when page scripts call them.
 
         ``paths`` is a ``list[str]`` of minimal dotted ``"receiver.method"`` paths —
@@ -318,11 +318,21 @@ class Page:
         ``"window.setTimeout"`` — naming a known host method. Duplicates are
         deduped; an empty list is valid (enabled, watches nothing). Calling it
         replaces any prior set and takes effect for subsequent script execution on
-        this ``Page``; the registration **persists across ``load()``** (the same
-        page's observation intent continues). This phase records **calls only** — no
-        breakpoints, no pause, no argument/return/stack capture, no wildcard/regex
-        paths, no property watches, and no JS-visible watch API. A non-``list`` or a
-        non-``str`` element raises ``TypeError`` (before any state changes); after
+        this ``Page``; the registration (and ``break_on_hit``) **persists across
+        ``load()``** (the same page's observation intent continues).
+
+        With ``break_on_hit=False`` (default) this is pure recording — no
+        breakpoint/pause. With ``break_on_hit=True``, a matched host-method call is
+        recorded **and** schedules a V8 Inspector pause on the next statement, so an
+        attached DevTools client observes a pause. If no Inspector session is
+        attached (``devtools_url()`` never called, or no client connected), it is
+        recorded only — no pause, no error (the gentle 口径). This phase does **not**
+        change ``debugger;`` semantics, add a resume/continue API, or capture
+        arguments / return values / stacks; the path support range is unchanged
+        (calls only, no wildcard/regex/property watches, no JS-visible API).
+
+        A non-``list`` ``paths``, a non-``str`` element, or a non-``bool``
+        ``break_on_hit`` raises ``TypeError`` (before any state changes); after
         ``dispose()`` it raises ``JSContextDisposedError``.
         """
         if not isinstance(paths, list):
@@ -330,7 +340,9 @@ class Page:
         for index, path in enumerate(paths):
             if not isinstance(path, str):
                 raise TypeError(f"paths[{index}] must be a str")
-        self._native.watch_apis(paths)
+        if not isinstance(break_on_hit, bool):
+            raise TypeError("break_on_hit must be a bool")
+        self._native.watch_apis(paths, break_on_hit)
 
     def read_watch_api_hits(self) -> list:
         """Return the recorded watch-API call hits and clear the log (read-and-clear).
