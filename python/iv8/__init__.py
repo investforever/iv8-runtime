@@ -654,6 +654,23 @@ touch it. Works on a detached ``<form>``. Still **no** ``form.encoding`` alias /
 ``checkValidity()`` / ``reportValidity()`` / ``willValidate`` / ``.noValidate`` on any
 other element. No new Python API / top-level object / exception.
 
+M8-1 (TextEncoder / TextDecoder) adds two JS-side global constructors covering the
+common UTF-8 path only. ``new TextEncoder()`` exposes read-only ``encoding ===
+"utf-8"`` and ``encode(input)`` → a ``Uint8Array`` of ``String(input)`` in UTF-8
+(``encode("")`` → an empty array). ``new TextDecoder(label?, options?)`` accepts only
+the UTF-8 label — ``undefined`` / ``""`` / ``"utf-8"`` / ``"utf8"`` (ASCII-trimmed,
+case-insensitive) all mean UTF-8; **any other label is a ``RangeError``**. It exposes
+read-only ``encoding === "utf-8"`` and ``decode(input?)`` → the UTF-8 decoding of a
+``BufferSource`` (``ArrayBuffer`` or any ``ArrayBufferView`` — ``Uint8Array`` /
+typed array / ``DataView``); ``decode()`` / ``decode(undefined)`` → ``""``; any other
+argument is a ``TypeError``. Decoding is **lenient** — malformed bytes become U+FFFD.
+``options.fatal`` / ``options.ignoreBOM`` are captured as read-only booleans but do
+**not** change behaviour this phase (no fatal errors, no BOM stripping). UTF-8
+conversion is delegated to V8. Still **no** ``encodeInto`` / streaming /
+``TextEncoderStream`` / ``TextDecoderStream`` / non-UTF-8 encodings / ``Blob`` /
+``File`` / ``URL`` / ``atob`` / ``btoa``. No new Python API / top-level object /
+exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
