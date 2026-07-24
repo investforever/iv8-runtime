@@ -3005,6 +3005,154 @@ void usp_to_string(const v8::FunctionCallbackInfo<v8::Value>& info) {
         v8_string(isolate, usp_read_state(isolate, context, info.This())));
 }
 
+// M8-4 atob / btoa — minimal standard Base64. btoa operates on a "binary string"
+// (each UTF-16 code unit must be <= 0xFF; its low 8 bits is the byte); atob returns a
+// binary string (each output byte becomes a Latin-1 code unit 0..255, via
+// NewFromOneByte). ASCII whitespace in atob input is ignored. Both error paths throw a
+// JS TypeError (the project has no DOMException/InvalidCharacterError). No base64url /
+// ArrayBuffer API / streaming / auto UTF-8.
+std::string base64_encode(const std::string& in) {
+    static const char kTbl[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    std::size_t i = 0;
+    const std::size_t n = in.size();
+    while (i + 3 <= n) {
+        const std::uint32_t x = (static_cast<std::uint8_t>(in[i]) << 16) |
+                                (static_cast<std::uint8_t>(in[i + 1]) << 8) |
+                                static_cast<std::uint8_t>(in[i + 2]);
+        out += kTbl[(x >> 18) & 63];
+        out += kTbl[(x >> 12) & 63];
+        out += kTbl[(x >> 6) & 63];
+        out += kTbl[x & 63];
+        i += 3;
+    }
+    const std::size_t rem = n - i;
+    if (rem == 1) {
+        const std::uint32_t x = static_cast<std::uint8_t>(in[i]) << 16;
+        out += kTbl[(x >> 18) & 63];
+        out += kTbl[(x >> 12) & 63];
+        out += "==";
+    } else if (rem == 2) {
+        const std::uint32_t x = (static_cast<std::uint8_t>(in[i]) << 16) |
+                                (static_cast<std::uint8_t>(in[i + 1]) << 8);
+        out += kTbl[(x >> 18) & 63];
+        out += kTbl[(x >> 12) & 63];
+        out += kTbl[(x >> 6) & 63];
+        out += "=";
+    }
+    return out;
+}
+
+int base64_val(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+// Forgiving-base64 decode (WHATWG口径): strip ASCII whitespace; ONLY when the length
+// is a multiple of 4, remove up to two trailing '='; then a length % 4 == 1 is a
+// failure, and any remaining non-alphabet code point (including a stray '=') is a
+// failure. Returns false on any violation.
+bool base64_decode(const std::string& in, std::string& out) {
+    std::string s;
+    for (char c : in) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' ||
+            c == '\v') {
+            continue;
+        }
+        s += c;
+    }
+    if (s.size() % 4 == 0) {
+        std::size_t k = s.size();
+        int pad = 0;
+        while (k > 0 && s[k - 1] == '=' && pad < 2) {
+            pad++;
+            k--;
+        }
+        s.resize(k);
+    }
+    if (s.size() % 4 == 1) {
+        return false;
+    }
+    std::uint32_t buf = 0;
+    int bits = 0;
+    for (char c : s) {
+        const int v = base64_val(c);
+        if (v < 0) {
+            return false;  // a stray '=' or a non-alphabet character
+        }
+        buf = (buf << 6) | static_cast<std::uint32_t>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out += static_cast<char>((buf >> bits) & 0xFF);
+        }
+        buf &= (bits > 0) ? ((1u << bits) - 1) : 0u;  // keep only pending bits
+    }
+    return true;
+}
+
+void btoa_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::String> str;
+    if (!info[0]->ToString(context).ToLocal(&str)) {
+        return;  // ToString threw
+    }
+    v8::String::Value units(isolate, str);  // UTF-16 code units
+    std::string bytes;
+    if (*units != nullptr) {
+        bytes.reserve(static_cast<std::size_t>(units.length()));
+        for (int i = 0; i < units.length(); i++) {
+            const std::uint16_t u = (*units)[i];
+            if (u > 0xFF) {
+                isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(
+                        isolate,
+                        "btoa: string contains characters outside the Latin1 range")));
+                return;
+            }
+            bytes += static_cast<char>(u & 0xFF);
+        }
+    }
+    info.GetReturnValue().Set(v8_string(isolate, base64_encode(bytes)));
+}
+
+void atob_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::String> str;
+    if (!info[0]->ToString(context).ToLocal(&str)) {
+        return;  // ToString threw
+    }
+    v8::String::Utf8Value utf8(isolate, str);  // valid base64 is ASCII
+    const std::string input =
+        (*utf8 != nullptr)
+            ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
+            : std::string();
+    std::string decoded;
+    if (!base64_decode(input, decoded)) {
+        isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(
+                isolate, "atob: the string to be decoded is not correctly encoded")));
+        return;
+    }
+    // Each decoded byte becomes a Latin-1 code unit (0..255) — a "binary string".
+    v8::Local<v8::String> result;
+    if (v8::String::NewFromOneByte(
+            isolate, reinterpret_cast<const std::uint8_t*>(decoded.data()),
+            v8::NewStringType::kNormal, static_cast<int>(decoded.size()))
+            .ToLocal(&result)) {
+        info.GetReturnValue().Set(result);
+    } else {
+        info.GetReturnValue().Set(v8::String::Empty(isolate));
+    }
+}
+
 }  // namespace
 
 PageState::PageState() {
@@ -3171,6 +3319,12 @@ void PageState::install_page(const std::string& base_url,
                     context, v8_string(isolate, "URLSearchParams"),
                     usp_tpl->GetFunction(context).ToLocalChecked());
             }
+
+            // M8-4 global atob / btoa (minimal standard Base64).
+            install_global_function(isolate, context, global, "btoa",
+                                    &btoa_callback);
+            install_global_function(isolate, context, global, "atob",
+                                    &atob_callback);
         });
 }
 

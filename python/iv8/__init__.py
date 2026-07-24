@@ -668,7 +668,7 @@ argument is a ``TypeError``. Decoding is **lenient** — malformed bytes become 
 **not** change behaviour this phase (no fatal errors, no BOM stripping). UTF-8
 conversion is delegated to V8. Still **no** ``encodeInto`` / streaming /
 ``TextEncoderStream`` / ``TextDecoderStream`` / non-UTF-8 encodings / ``Blob`` /
-``File`` / ``atob`` / ``btoa``. No new Python API / top-level object / exception.
+``File``. No new Python API / top-level object / exception.
 
 M8-2 (URL) adds a JS-side global ``URL`` constructor exposing a minimal **read-only**
 URL object. ``new URL(input, base?)`` runs ``input`` (and ``base``, when given)
@@ -705,6 +705,20 @@ uppercase ``%XX``. It is **not** linked to ``URL`` (``url.searchParams`` is stil
 absent). Still **no** iterator / ``entries`` / ``keys`` / ``values`` / ``forEach`` /
 ``sort`` / ``size`` / ``record`` or pair-list init / ``FormData`` / ``fetch``. No new
 Python API / top-level object / exception (unsupported init surfaces as a JS
+``TypeError``).
+
+M8-4 (atob / btoa) adds two JS-side global functions for minimal standard Base64.
+``btoa(input)`` runs ``String(input)`` and treats it as a **binary string**: if any
+UTF-16 code unit is ``> 0xFF`` it throws a ``TypeError`` (this build has no
+``InvalidCharacterError``; the ``TypeError`` 口径 is fixed), otherwise each code unit's
+low 8 bits is a byte and the bytes are Base64-encoded; ``btoa("") === ""``.
+``atob(input)`` runs ``String(input)`` and decodes standard Base64, returning a
+**binary string** (each output byte becomes a Latin-1 code unit 0..255); ASCII
+whitespace in the input is ignored, ``atob("") === ""``, and malformed input throws a
+``TypeError`` (fixed 口径). They are byte/code-unit operations only — **no** automatic
+UTF-8 text handling. Still **no** ``base64url`` / URL-safe alphabet / ``Buffer`` /
+``Uint8Array.fromBase64`` / ``ArrayBuffer`` direct API / streaming / ``escape`` /
+``unescape``. No new Python API / top-level object / exception (error paths are JS
 ``TypeError``).
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
