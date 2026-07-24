@@ -1,4 +1,5 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>  // M9-2: list[str] <-> std::vector<std::string> for watch_apis
 
 #include "iv8/page_state.h"
 

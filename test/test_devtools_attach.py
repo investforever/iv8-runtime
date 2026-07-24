@@ -51,7 +51,8 @@ def test_surface_shape():
     for name in ("DevToolsServer", "devtools_url", "_devtools"):
         assert not hasattr(iv8, name)
     # None of the explicitly-frozen extra DevTools APIs exist on Page.
-    for attr in ("with_devtools", "enable_devtools", "devtools_port", "watch_apis",
+    # (watch_apis arrived in M9-2 — no longer frozen here.)
+    for attr in ("with_devtools", "enable_devtools", "devtools_port",
                  "pause", "resume", "list_contexts"):
         assert not hasattr(iv8.Page, attr)
 
