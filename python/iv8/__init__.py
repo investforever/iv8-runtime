@@ -668,8 +668,24 @@ argument is a ``TypeError``. Decoding is **lenient** — malformed bytes become 
 **not** change behaviour this phase (no fatal errors, no BOM stripping). UTF-8
 conversion is delegated to V8. Still **no** ``encodeInto`` / streaming /
 ``TextEncoderStream`` / ``TextDecoderStream`` / non-UTF-8 encodings / ``Blob`` /
-``File`` / ``URL`` / ``atob`` / ``btoa``. No new Python API / top-level object /
-exception.
+``File`` / ``atob`` / ``btoa``. No new Python API / top-level object / exception.
+
+M8-2 (URL) adds a JS-side global ``URL`` constructor exposing a minimal **read-only**
+URL object. ``new URL(input, base?)`` runs ``input`` (and ``base``, when given)
+through ``String(...)`` and resolves them with the project's minimal URL 口径 — the
+same ``scheme://host[:port]/path?query#hash`` decomposition that backs ``location``:
+an absolute ``scheme://…`` input is taken as-is; otherwise a base that is itself
+absolute-with-authority is required and the reference is merged (protocol-relative
+``//``, absolute-path ``/``, query ``?``, fragment ``#``, or a directory-relative
+path — no dot-segment collapsing / percent handling). A relative input with no usable
+base is a **``TypeError``** (as is calling without ``new``). Each instance exposes the
+read-only fields ``href`` / ``origin`` / ``protocol`` / ``host`` / ``hostname`` /
+``pathname`` / ``search`` / ``hash`` (identical decomposition to ``location``) plus
+``toString()`` and ``toJSON()``, both returning ``href``. It is pure value
+decomposition — **no** navigation, network, or resource loading. Still **no**
+``URLSearchParams`` / ``searchParams`` / ``username`` / ``password`` / ``port`` / any
+setter / ``createObjectURL`` / ``Blob`` / ``File`` / ``fetch``. No new Python API /
+top-level object / exception (construction failure surfaces as a JS ``TypeError``).
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

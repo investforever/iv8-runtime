@@ -2606,6 +2606,141 @@ void text_decoder_decode(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
 }
 
+// M8-2 global URL — a minimal read-only URL object built on the same decompose_url
+// decomposition that backs `location`, so the field 口径 is identical. A string is
+// "absolute" iff it matches `scheme://…` (a valid scheme followed by `://`).
+bool url_is_absolute(const std::string& s) {
+    const auto pos = s.find("://");
+    if (pos == std::string::npos || pos == 0) {
+        return false;
+    }
+    if (!std::isalpha(static_cast<unsigned char>(s[0]))) {
+        return false;
+    }
+    for (std::size_t i = 0; i < pos; i++) {
+        const char c = s[i];
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '-' ||
+              c == '.')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Resolve `input` against optional `base` under the project's minimal URL 口径:
+// an absolute input is taken as-is (base ignored); otherwise a base that is itself
+// absolute-with-authority is required, and the reference is merged (protocol-relative
+// `//`, absolute-path `/`, query `?`, fragment `#`, or a directory-relative path — no
+// dot-segment collapsing). Returns false (=> constructor throws TypeError) when the
+// input is relative and no usable base is available.
+bool resolve_url(const std::string& input, bool has_base, const std::string& base,
+                 std::string& out) {
+    if (url_is_absolute(input)) {
+        out = input;
+        return true;
+    }
+    if (!has_base || !url_is_absolute(base)) {
+        return false;
+    }
+    const UrlParts b = decompose_url(base);
+    if (b.origin.empty()) {
+        return false;  // base had no authority to resolve against
+    }
+    if (input.empty()) {
+        out = b.protocol + "//" + b.host + b.pathname + b.search;  // drop base fragment
+        return true;
+    }
+    const char c0 = input[0];
+    if (c0 == '#') {
+        out = b.protocol + "//" + b.host + b.pathname + b.search + input;
+        return true;
+    }
+    if (c0 == '?') {
+        out = b.protocol + "//" + b.host + b.pathname + input;
+        return true;
+    }
+    if (c0 == '/') {
+        out = (input.rfind("//", 0) == 0) ? (b.protocol + input)  // protocol-relative
+                                          : (b.origin + input);   // absolute path
+        return true;
+    }
+    std::string dir = b.pathname;
+    const auto slash = dir.rfind('/');
+    dir = (slash == std::string::npos) ? std::string("/") : dir.substr(0, slash + 1);
+    if (dir.empty()) {
+        dir = "/";
+    }
+    out = b.origin + dir + input;  // directory-relative merge
+    return true;
+}
+
+// `new URL(input, base?)`. input / base go through String(...); resolution failure
+// (relative input with no usable base) is a TypeError. Fields are read-only own data
+// properties matching location's decomposition. Requires a construct call.
+void url_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (!info.IsConstructCall()) {
+        isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(isolate,
+                                           "URL constructor requires 'new'")));
+        return;
+    }
+    const auto to_std = [&](v8::Local<v8::Value> v, std::string& out) -> bool {
+        v8::Local<v8::String> str;
+        if (!v->ToString(context).ToLocal(&str)) {
+            return false;
+        }
+        v8::String::Utf8Value utf8(isolate, str);
+        out = (*utf8 != nullptr)
+                  ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
+                  : std::string();
+        return true;
+    };
+    std::string input;
+    if (!to_std(info[0], input)) {
+        return;  // ToString threw
+    }
+    const bool has_base = info.Length() > 1 && !info[1]->IsUndefined();
+    std::string base;
+    if (has_base && !to_std(info[1], base)) {
+        return;  // ToString threw
+    }
+    std::string href;
+    if (!resolve_url(input, has_base, base, href)) {
+        isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(isolate, "Invalid URL")));
+        return;
+    }
+    const UrlParts parts = decompose_url(href);
+    v8::Local<v8::Object> self = info.This();
+    const auto define = [&](const char* name, const std::string& value) {
+        (void)self->DefineOwnProperty(
+            context, v8::String::NewFromUtf8(isolate, name).ToLocalChecked(),
+            v8_string(isolate, value), v8::ReadOnly);
+    };
+    define("href", parts.href);
+    define("origin", parts.origin);
+    define("protocol", parts.protocol);
+    define("host", parts.host);
+    define("hostname", parts.hostname);
+    define("pathname", parts.pathname);
+    define("search", parts.search);
+    define("hash", parts.hash);
+}
+
+// url.toString() / url.toJSON() — both return this.href.
+void url_to_href(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Local<v8::Value> href;
+    if (info.This()->Get(context, v8_string(isolate, "href")).ToLocal(&href)) {
+        info.GetReturnValue().Set(href);
+    } else {
+        info.GetReturnValue().Set(v8::String::Empty(isolate));
+    }
+}
+
 }  // namespace
 
 PageState::PageState() {
@@ -2727,6 +2862,24 @@ void PageState::install_page(const std::string& base_url,
                                   "encode", &text_encoder_encode);
             install_encoding_ctor("TextDecoder", &text_decoder_constructor,
                                   "decode", &text_decoder_decode);
+
+            // M8-2 global URL: constructor with read-only per-instance fields (set in
+            // the constructor) + toString / toJSON prototype methods returning href.
+            {
+                v8::Local<v8::FunctionTemplate> url_tpl =
+                    v8::FunctionTemplate::New(isolate, &url_constructor);
+                url_tpl->SetClassName(
+                    v8::String::NewFromUtf8Literal(isolate, "URL"));
+                v8::Local<v8::ObjectTemplate> url_proto =
+                    url_tpl->PrototypeTemplate();
+                url_proto->Set(isolate, "toString",
+                               v8::FunctionTemplate::New(isolate, &url_to_href));
+                url_proto->Set(isolate, "toJSON",
+                               v8::FunctionTemplate::New(isolate, &url_to_href));
+                (void)global->Set(
+                    context, v8_string(isolate, "URL"),
+                    url_tpl->GetFunction(context).ToLocalChecked());
+            }
         });
 }
 
