@@ -119,10 +119,18 @@ private:
     // from devtools_enable(); both already hold the isolate scope.
     void install_inspector(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
-    // M9-3: request the current Inspector session to pause on the next statement
-    // (the watch-registry pause callback). A no-op when no session is attached, so
-    // break_on_hit records-only until an external DevTools client has connected.
+    // M9-3: request the current Inspector session to pause (the watch-registry
+    // pause callback). A no-op when no session is attached, so break_on_hit
+    // records-only until an external DevTools client has connected.
     void request_inspector_pause();
+
+public:
+    // M9-3 internal probe (bound as _core.Page.devtools_pause_count; NOT public
+    // iv8.Page surface): number of times the current generation's Inspector has
+    // paused. Used by tests to confirm break_on_hit actually stopped the Inspector.
+    int devtools_pause_count();
+
+private:
 
     // Minimal internal page root state captured by load() — the seed for a later
     // document bootstrap. Intentionally NOT exposed (no public document surface

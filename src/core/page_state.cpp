@@ -1,6 +1,7 @@
 #include "iv8/page_state.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -3211,10 +3212,24 @@ std::string inspector_sv_to_utf8(v8::Isolate* isolate,
     return std::string();
 }
 
-// Minimal Inspector client — every V8InspectorClient method has a default
-// implementation, so the empty subclass is a valid, no-op embedder client (no
-// pause loop; there is no message loop this phase).
-class DevToolsClient : public v8_inspector::V8InspectorClient {};
+// Minimal Inspector client. Every V8InspectorClient method has a default
+// implementation. M9-3: runMessageLoopOnPause is overridden to COUNT pauses and
+// return immediately (no nested loop — never blocks). V8 calls it only when the
+// debugger actually pauses, so the count is direct evidence that a break happened.
+class DevToolsClient : public v8_inspector::V8InspectorClient {
+public:
+    void runMessageLoopOnPause(int /*contextGroupId*/) override {
+        pause_count_.fetch_add(1, std::memory_order_relaxed);
+        // Return immediately: there is no message loop this phase, so the paused
+        // state is instantaneous (observable, non-blocking).
+    }
+    int pause_count() const {
+        return pause_count_.load(std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<int> pause_count_{0};
+};
 
 // Channel that accumulates the session's synchronous outbound CDP messages
 // (responses + notifications) into a buffer the dispatch call drains and returns.
@@ -3273,14 +3288,20 @@ void PageState::request_inspector_pause() {
         return;
     }
     static const char kReason[] = "watch_apis";
-    // Schedule a pause at the next statement; when the Debugger domain is enabled
-    // on the session, the client observes Debugger.paused. Called on the isolate
-    // thread (a host method fired during script execution), so the session call is
-    // safe here.
-    inspector_->session->schedulePauseOnNextStatement(
+    // breakProgram pauses immediately at the current point (we are on the JS stack
+    // inside the watched host-method call, like a `debugger` statement). When the
+    // Debugger domain is enabled on the session, V8 emits Debugger.paused and calls
+    // the client's runMessageLoopOnPause (which counts the pause and returns).
+    inspector_->session->breakProgram(
         v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kReason),
                                  sizeof(kReason) - 1),
         v8_inspector::StringView());
+}
+
+int PageState::devtools_pause_count() {
+    // Internal probe: how many times the current generation's Inspector has paused
+    // (0 if devtools was never enabled). Reset per generation with the Inspector.
+    return inspector_ != nullptr ? inspector_->client.pause_count() : 0;
 }
 
 void PageState::install_inspector(v8::Isolate* isolate,

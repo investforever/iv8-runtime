@@ -32,5 +32,7 @@ void register_page(py::module_& module) {
         // Page.read_watch_api_hits — type validation done in the Python facade).
         .def("watch_apis", &iv8::PageState::watch_apis, py::arg("paths"),
              py::arg("break_on_hit"))
-        .def("read_watch_api_hits", &iv8::PageState::read_watch_api_hits);
+        .def("read_watch_api_hits", &iv8::PageState::read_watch_api_hits)
+        // M9-3 internal pause probe (public surface stays Page.watch_apis only).
+        .def("devtools_pause_count", &iv8::PageState::devtools_pause_count);
 }
