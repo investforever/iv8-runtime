@@ -383,6 +383,12 @@ struct DomNode {
     // at parse/create time, then decoupled. Only meaningful for <input> (minimal:
     // no type distinction, no radio-group exclusivity, no defaultChecked).
     bool checked = false;
+    // M7-3 <form>.method runtime slot: the normalized submission method ("get" or
+    // "post"). Seeded ONCE at parse/create from the `method` attribute (normalized),
+    // defaulting to "get" (no attribute / createElement('form')), then decoupled from
+    // the attribute. Only meaningful for <form> (the property is exposed only there);
+    // form.reset() does NOT touch it. Minimal metadata: not "dialog", no other verbs.
+    std::string method = "get";
     // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
     // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
     // not follow later attribute/textContent edits). reset() restores value /
@@ -710,6 +716,17 @@ std::string option_value_of(const DomNode* option) {
         return it->second;
     }
     return option->text_content;
+}
+
+// M7-3: minimal <form>.method normalization. ASCII-lowercase the raw string; if it
+// is exactly "get" or "post", keep it; any other value (incl. "" and "dialog") maps
+// to "get". This is the whole normalization contract — no attribute reflection.
+std::string normalize_form_method(const std::string& raw) {
+    const std::string lower = ascii_lower(raw);
+    if (lower == "get" || lower == "post") {
+        return lower;
+    }
+    return "get";
 }
 
 // M5-5: the <option> descendants of `root` in document order (used by
@@ -1112,9 +1129,10 @@ public:
             "parentElement", "firstElementChild", "lastElementChild",
             "childElementCount"};
         // M5-1: `elements` is exposed only on <form> (so non-form elements have no
-        // `.elements` property at all).
+        // `.elements` property at all). M7-3: `method` (read-write) too.
         if (node_->tag == "form") {
             names.push_back("elements");
+            names.push_back("method");
         }
         // M5-2: `form` (owner-form) is exposed only on the four form controls.
         if (node_->tag == "input" || node_->tag == "button" ||
@@ -1189,6 +1207,10 @@ public:
         if (node_->tag == "input") {
             names.push_back("checked");
         }
+        // M7-3: form.method is read-write (normalized on write).
+        if (node_->tag == "form") {
+            names.push_back("method");
+        }
         return names;
     }
 
@@ -1252,6 +1274,18 @@ public:
                 } else {
                     seen = true;
                 }
+            }
+        }
+        // M7-3: seed each <form>'s .method slot from its `method` attribute
+        // (normalized to "get"/"post"), decoupled from the attribute thereafter.
+        // No attribute -> the default "get" already set on the node stands.
+        for (const std::unique_ptr<DomNode>& node : pool_) {
+            if (node->tag != "form") {
+                continue;
+            }
+            const auto it = node->attributes.find("method");
+            if (it != node->attributes.end()) {
+                node->method = normalize_form_method(it->second);
             }
         }
         // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
@@ -1849,6 +1883,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "text") {
         return v8_string(isolate, node_->text_content);
     }
+    // M7-3: form.method — the current normalized submission method ("get"/"post"),
+    // read-write, exposed only on <form>. Decoupled from the `method` attribute:
+    // reading returns the runtime slot, not getAttribute('method'). Pure metadata —
+    // it does not trigger submit()/requestSubmit() behaviour (both stay no-ops).
+    if (name == "method") {
+        return v8_string(isolate, node_->method);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1870,8 +1911,8 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
         node_->checked = value->BooleanValue(isolate);
         return;
     }
-    if (name != "textContent" && name != "value") {
-        return;  // textContent (M2-8) + value (M5-3/4/5) are the writable props
+    if (name != "textContent" && name != "value" && name != "method") {
+        return;  // textContent (M2-8) + value (M5-3/4/5) + method (M7-3) are writable
     }
     std::string str_value;
     v8::Local<v8::String> str;
@@ -1880,6 +1921,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
         if (*utf8 != nullptr) {
             str_value.assign(*utf8, static_cast<std::size_t>(utf8.length()));
         }
+    }
+    // M7-3: form.method = X -> store normalize(String(X)) in the runtime slot only
+    // (does NOT write the `method` attribute). Writable only on <form>.
+    if (name == "method") {
+        node_->method = normalize_form_method(str_value);
+        return;
     }
     if (name == "value") {
         // M5-5: select.value = X — select the first <option> in this select's

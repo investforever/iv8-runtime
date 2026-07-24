@@ -579,8 +579,22 @@ It does **not** take or validate a submitter, dispatch a ``submit`` / ``input`` 
 both attached and detached ``<form>`` elements; the call itself never throws (the
 existing dispose / stale error paths are unchanged). Still **no**
 ``requestSubmit(submitter)`` / ``event.submitter`` / ``submit`` event /
-``checkValidity()`` / ``FormData`` / ``action`` / ``method`` / ``enctype``. No new
+``checkValidity()`` / ``FormData`` / ``action`` / ``enctype``. No new
 Python API / top-level object / exception.
+
+M7-3 (form method metadata) adds a read-write string property ``form.method`` exposed
+**only on ``<form>`` elements**. It is seeded once at parse/create from the ``method``
+attribute and normalized: the value is ASCII-lowercased, and if it is exactly
+``"get"`` or ``"post"`` that is stored, otherwise it stores ``"get"`` (so an absent
+attribute, ``createElement('form')``, an unknown verb, or ``"dialog"`` all yield
+``"get"``). Writing ``form.method = X`` stores ``normalize(String(X))``. It is
+**decoupled from the attribute** in both directions: ``form.method = ...`` does not
+change ``getAttribute('method')``, and ``setAttribute('method', ...)`` does not change
+``form.method``. It is pure metadata — reading or writing it triggers **no** submission
+behaviour (``submit()`` / ``requestSubmit()`` stay no-ops), and ``form.reset()`` does
+not touch it. Works on a detached ``<form>``. Still **no** ``form.action`` /
+``form.enctype`` / ``form.target`` / ``form.noValidate`` / ``.method`` on any other
+element. No new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
