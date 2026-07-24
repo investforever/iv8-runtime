@@ -182,7 +182,7 @@ def test_mixed_page_cooperation():
               return [start, rw, callable, globalThis.ran === 0, df.isConnected].join(';');
             })();
             """
-        ) == (f"get||{URLENC}|;"                       # detached defaults
+        ) == (f"get||{URLENC}||false;"                 # detached defaults (5 fields)
               "post|/d|text/plain|_blank|true;"        # after read-write
               "true,true;"                             # entry points callable
               "true;"                                  # script inert
