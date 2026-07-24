@@ -48,8 +48,8 @@ def test_enctype_only_on_form():
         assert page.eval("typeof document.getElementById('f').enctype") == "string"
         for eid in ("in", "bt", "dv"):
             assert page.eval(f"typeof document.getElementById('{eid}').enctype") == "undefined"
-        # sibling metadata stays frozen (form.encoding alias not provided)
-        for m in ("target", "noValidate", "encoding"):
+        # sibling metadata stays frozen (form.target M7-6; encoding alias not provided)
+        for m in ("noValidate", "encoding"):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
 
 

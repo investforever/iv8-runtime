@@ -402,6 +402,12 @@ struct DomNode {
     // meaningful for <form>; form.reset() does NOT touch it. Metadata only — no body
     // encoding is implemented.
     std::string enctype = "application/x-www-form-urlencoded";
+    // M7-6 <form>.target runtime slot: the raw submission-target string. Seeded ONCE
+    // at parse/create from the `target` attribute verbatim (NO browsing-context lookup
+    // / window resolution / _self,_blank,... special semantics), defaulting to "" (no
+    // attribute / createElement('form')), then decoupled from the attribute. Only
+    // meaningful for <form>; form.reset() does NOT touch it.
+    std::string target;
     // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
     // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
     // not follow later attribute/textContent edits). reset() restores value /
@@ -1154,13 +1160,14 @@ public:
             "parentElement", "firstElementChild", "lastElementChild",
             "childElementCount"};
         // M5-1: `elements` is exposed only on <form> (so non-form elements have no
-        // `.elements` property at all). M7-3/M7-4/M7-5: `method` / `action` /
-        // `enctype` (all read-write).
+        // `.elements` property at all). M7-3/M7-4/M7-5/M7-6: `method` / `action` /
+        // `enctype` / `target` (all read-write).
         if (node_->tag == "form") {
             names.push_back("elements");
             names.push_back("method");
             names.push_back("action");
             names.push_back("enctype");
+            names.push_back("target");
         }
         // M5-2: `form` (owner-form) is exposed only on the four form controls.
         if (node_->tag == "input" || node_->tag == "button" ||
@@ -1235,12 +1242,13 @@ public:
         if (node_->tag == "input") {
             names.push_back("checked");
         }
-        // M7-3/M7-4/M7-5: form.method (normalized) / form.action (raw) /
-        // form.enctype (normalized) are all read-write.
+        // M7-3/M7-4/M7-5/M7-6: form.method (normalized) / form.action (raw) /
+        // form.enctype (normalized) / form.target (raw) are all read-write.
         if (node_->tag == "form") {
             names.push_back("method");
             names.push_back("action");
             names.push_back("enctype");
+            names.push_back("target");
         }
         return names;
     }
@@ -1307,11 +1315,11 @@ public:
                 }
             }
         }
-        // M7-3/M7-4/M7-5: seed each <form>'s .method / .action / .enctype slots from
-        // the matching attributes, decoupled from the attribute thereafter. method is
-        // normalized to "get"/"post" (absent -> default "get"); action is seeded
-        // verbatim (no URL parsing; absent -> default ""); enctype is normalized to
-        // one of the three HTML enctypes (absent -> the default urlencoded stands).
+        // M7-3/M7-4/M7-5/M7-6: seed each <form>'s .method / .action / .enctype /
+        // .target slots from the matching attributes, decoupled from the attribute
+        // thereafter. method is normalized to "get"/"post" (absent -> default "get");
+        // action/target are seeded verbatim (no URL/context parsing; absent -> "");
+        // enctype is normalized to one of the three HTML enctypes (absent -> default).
         for (const std::unique_ptr<DomNode>& node : pool_) {
             if (node->tag != "form") {
                 continue;
@@ -1327,6 +1335,10 @@ public:
             const auto eit = node->attributes.find("enctype");
             if (eit != node->attributes.end()) {
                 node->enctype = normalize_form_enctype(eit->second);
+            }
+            const auto tit = node->attributes.find("target");
+            if (tit != node->attributes.end()) {
+                node->target = tit->second;
             }
         }
         // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
@@ -1945,6 +1957,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "enctype") {
         return v8_string(isolate, node_->enctype);
     }
+    // M7-6: form.target — the current raw submission-target string, read-write,
+    // exposed only on <form>. Decoupled from the `target` attribute (reading returns
+    // the runtime slot). No browsing-context / window resolution / _self,_blank,...
+    // semantics. Pure metadata — submit()/requestSubmit() stay no-ops.
+    if (name == "target") {
+        return v8_string(isolate, node_->target);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1967,8 +1986,8 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
         return;
     }
     if (name != "textContent" && name != "value" && name != "method" &&
-        name != "action" && name != "enctype") {
-        return;  // textContent (M2-8) + value (M5-3/4/5) + method/action/enctype (M7)
+        name != "action" && name != "enctype" && name != "target") {
+        return;  // textContent + value + method/action/enctype/target (M7-3..6)
     }
     std::string str_value;
     v8::Local<v8::String> str;
@@ -1994,6 +2013,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     // (does NOT write the `enctype` attribute). Writable only on <form>.
     if (name == "enctype") {
         node_->enctype = normalize_form_enctype(str_value);
+        return;
+    }
+    // M7-6: form.target = X -> store String(X) verbatim in the runtime slot only (no
+    // context resolution; does NOT write the `target` attribute). Form-only.
+    if (name == "target") {
+        node_->target = str_value;
         return;
     }
     if (name == "value") {

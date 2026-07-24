@@ -626,6 +626,19 @@ detached ``<form>``. Still **no** ``form.target`` / ``form.noValidate`` /
 ``form.encoding`` alias / ``.enctype`` on any other element. No new Python API /
 top-level object / exception.
 
+M7-6 (form target metadata) adds a read-write string property ``form.target`` exposed
+**only on ``<form>`` elements**. It is seeded once at parse/create from the ``target``
+attribute **verbatim** — this phase does **no** browsing-context lookup, window
+resolution, or ``_self`` / ``_blank`` / ``_parent`` / ``_top`` special handling —
+defaulting to ``""`` (absent attribute or ``createElement('form')``). Writing
+``form.target = X`` stores ``String(X)`` as-is. Like ``form.action`` it is **decoupled
+from the attribute** in both directions, and it is independent of ``form.method`` /
+``form.action`` / ``form.enctype``. It is pure metadata — reading or writing it triggers
+**no** submission behaviour (``submit()`` / ``requestSubmit()`` stay no-ops), and
+``form.reset()`` does not touch it. Works on a detached ``<form>``. Still **no**
+``form.noValidate`` / ``form.encoding`` alias / ``.target`` on any other element. No new
+Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
