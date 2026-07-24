@@ -542,9 +542,21 @@ read-only and **fixed**: it does not follow the live ``input.value``, and
 ``input.value = ...`` / ``setAttribute('value', ...)`` do **not** change it. It is
 exactly the value ``form.reset()`` restores ``.value`` to. Works on a detached
 ``<input>``; a repeated ``load()`` / ``createElement`` establishes each new node's
-own baseline. Still **no** ``textarea.defaultValue`` / ``button.defaultValue`` / a
-writable default / specialized ``HTMLInputElement``. No new Python API / top-level
-object / exception.
+own baseline. Still **no** ``button.defaultValue`` / a writable default /
+specialized ``HTMLInputElement``. No new Python API / top-level object / exception.
+
+M6-5 (textarea default-value) extends the read-only ``defaultValue`` string property
+to ``<textarea>`` elements (in addition to ``<input>``; no other element gains it).
+It returns the textarea's fixed **reset baseline** value — the M6-1 initial snapshot,
+which for a textarea was seeded from its **initial text content** (M5-4):
+`<textarea>abc</textarea>` → ``"abc"``; empty / a fresh
+``createElement('textarea')`` → ``""``. It is read-only and **fixed**: it does not
+follow the live ``textarea.value``, and ``textarea.value = ...`` /
+``textarea.textContent = ...`` do **not** change it. It is exactly the value
+``form.reset()`` restores ``.value`` to. Works on a detached ``<textarea>``; a
+repeated ``load()`` / ``createElement`` establishes each new node's own baseline.
+Still **no** ``button.defaultValue`` / a writable default / specialized
+``HTMLTextAreaElement``. No new Python API / top-level object / exception.
 
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are

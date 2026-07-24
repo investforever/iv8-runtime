@@ -1144,6 +1144,11 @@ public:
             names.push_back("defaultChecked");
             names.push_back("defaultValue");
         }
+        // M6-5: `defaultValue` (read-only reset baseline) also on <textarea> (its
+        // baseline was seeded from the initial text content, M5-4/M6-1).
+        if (node_->tag == "textarea") {
+            names.push_back("defaultValue");
+        }
         return names;
     }
     std::vector<std::string> method_names() const override {
@@ -1829,9 +1834,10 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "defaultSelected") {
         return v8::Boolean::New(isolate, node_->initial_selected);
     }
-    // M6-4: input.defaultValue — the fixed reset baseline (M6-1 initial_value),
-    // read-only, exposed only on <input>. Does not follow live .value; it is what
-    // form.reset() restores .value to.
+    // M6-4/M6-5: input/textarea.defaultValue — the fixed reset baseline (M6-1
+    // initial_value), read-only, exposed only on <input>/<textarea>. Does not follow
+    // live .value; it is what form.reset() restores .value to. (For <textarea> the
+    // baseline was seeded from the initial text content, M5-4.)
     if (name == "defaultValue") {
         return v8_string(isolate, node_->initial_value);
     }
