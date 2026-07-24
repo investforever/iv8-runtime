@@ -610,6 +610,22 @@ no-ops), and ``form.reset()`` does not touch it. Works on a detached ``<form>``.
 **no** ``form.enctype`` / ``form.target`` / ``form.noValidate`` / ``.action`` on any
 other element. No new Python API / top-level object / exception.
 
+M7-5 (form enctype metadata) adds a read-write string property ``form.enctype`` exposed
+**only on ``<form>`` elements**. It is seeded once at parse/create from the ``enctype``
+attribute and normalized: the value is ASCII-lowercased, and if it is one of the three
+HTML enctypes (``"application/x-www-form-urlencoded"``, ``"multipart/form-data"``,
+``"text/plain"``) that is stored, otherwise it stores the default
+``"application/x-www-form-urlencoded"`` (so an absent attribute,
+``createElement('form')``, or any unknown value yields the urlencoded default). Writing
+``form.enctype = X`` stores ``normalize(String(X))``. Like ``form.method`` it is
+**decoupled from the attribute** in both directions, and it is independent of
+``form.method`` and ``form.action``. It is pure metadata — no body encoding is
+implemented, reading or writing it triggers **no** submission behaviour (``submit()`` /
+``requestSubmit()`` stay no-ops), and ``form.reset()`` does not touch it. Works on a
+detached ``<form>``. Still **no** ``form.target`` / ``form.noValidate`` /
+``form.encoding`` alias / ``.enctype`` on any other element. No new Python API /
+top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

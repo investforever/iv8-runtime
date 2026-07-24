@@ -174,9 +174,9 @@ def test_no_navigation_network_formdata_surface():
             (() => {
               const f = document.getElementById('f');
               f.requestSubmit();
-              // (form.method M7-3 / form.action M7-4; FormData / validation stay out)
+              // (form.method M7-3 / action M7-4 / enctype M7-5; FormData / validation out)
               return [typeof globalThis.FormData,          // undefined (not introduced)
-                      typeof f.enctype,                    // undefined
+                      typeof f.target,                     // undefined
                       typeof f.checkValidity].join(',');   // undefined
             })();
             """

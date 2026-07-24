@@ -41,8 +41,8 @@ def test_action_only_on_form():
         assert page.eval("typeof document.getElementById('f').action") == "string"
         for eid in ("in", "bt", "dv"):
             assert page.eval(f"typeof document.getElementById('{eid}').action") == "undefined"
-        # sibling metadata stays frozen
-        for m in ("enctype", "target", "noValidate"):
+        # sibling metadata stays frozen (form.enctype arrived in M7-5)
+        for m in ("target", "noValidate"):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
 
 

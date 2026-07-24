@@ -395,6 +395,13 @@ struct DomNode {
     // createElement('form')), then decoupled from the attribute. Only meaningful for
     // <form> (the property is exposed only there); form.reset() does NOT touch it.
     std::string action;
+    // M7-5 <form>.enctype runtime slot: the normalized form-submission encoding, one
+    // of the three HTML enctypes. Seeded ONCE at parse/create from the `enctype`
+    // attribute (normalized), defaulting to "application/x-www-form-urlencoded" (no
+    // attribute / createElement('form')), then decoupled from the attribute. Only
+    // meaningful for <form>; form.reset() does NOT touch it. Metadata only — no body
+    // encoding is implemented.
+    std::string enctype = "application/x-www-form-urlencoded";
     // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
     // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
     // not follow later attribute/textContent edits). reset() restores value /
@@ -733,6 +740,18 @@ std::string normalize_form_method(const std::string& raw) {
         return lower;
     }
     return "get";
+}
+
+// M7-5: minimal <form>.enctype normalization. ASCII-lowercase the raw string; if it
+// is one of the three HTML enctypes ("application/x-www-form-urlencoded",
+// "multipart/form-data", "text/plain"), keep it; any other value maps to the default
+// "application/x-www-form-urlencoded". No body-encoding behaviour — metadata only.
+std::string normalize_form_enctype(const std::string& raw) {
+    const std::string lower = ascii_lower(raw);
+    if (lower == "multipart/form-data" || lower == "text/plain") {
+        return lower;
+    }
+    return "application/x-www-form-urlencoded";
 }
 
 // M5-5: the <option> descendants of `root` in document order (used by
@@ -1135,11 +1154,13 @@ public:
             "parentElement", "firstElementChild", "lastElementChild",
             "childElementCount"};
         // M5-1: `elements` is exposed only on <form> (so non-form elements have no
-        // `.elements` property at all). M7-3/M7-4: `method` / `action` (read-write).
+        // `.elements` property at all). M7-3/M7-4/M7-5: `method` / `action` /
+        // `enctype` (all read-write).
         if (node_->tag == "form") {
             names.push_back("elements");
             names.push_back("method");
             names.push_back("action");
+            names.push_back("enctype");
         }
         // M5-2: `form` (owner-form) is exposed only on the four form controls.
         if (node_->tag == "input" || node_->tag == "button" ||
@@ -1214,10 +1235,12 @@ public:
         if (node_->tag == "input") {
             names.push_back("checked");
         }
-        // M7-3/M7-4: form.method (normalized on write) / form.action (raw) are r/w.
+        // M7-3/M7-4/M7-5: form.method (normalized) / form.action (raw) /
+        // form.enctype (normalized) are all read-write.
         if (node_->tag == "form") {
             names.push_back("method");
             names.push_back("action");
+            names.push_back("enctype");
         }
         return names;
     }
@@ -1284,10 +1307,11 @@ public:
                 }
             }
         }
-        // M7-3/M7-4: seed each <form>'s .method / .action slots from the matching
-        // attributes, decoupled from the attribute thereafter. method is normalized
-        // to "get"/"post" (absent -> default "get" stands); action is seeded verbatim
-        // (no URL parsing/normalization; absent -> default "" stands).
+        // M7-3/M7-4/M7-5: seed each <form>'s .method / .action / .enctype slots from
+        // the matching attributes, decoupled from the attribute thereafter. method is
+        // normalized to "get"/"post" (absent -> default "get"); action is seeded
+        // verbatim (no URL parsing; absent -> default ""); enctype is normalized to
+        // one of the three HTML enctypes (absent -> the default urlencoded stands).
         for (const std::unique_ptr<DomNode>& node : pool_) {
             if (node->tag != "form") {
                 continue;
@@ -1299,6 +1323,10 @@ public:
             const auto ait = node->attributes.find("action");
             if (ait != node->attributes.end()) {
                 node->action = ait->second;
+            }
+            const auto eit = node->attributes.find("enctype");
+            if (eit != node->attributes.end()) {
+                node->enctype = normalize_form_enctype(eit->second);
             }
         }
         // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
@@ -1910,6 +1938,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "action") {
         return v8_string(isolate, node_->action);
     }
+    // M7-5: form.enctype — the current normalized submission encoding, read-write,
+    // exposed only on <form>. Decoupled from the `enctype` attribute (reading returns
+    // the runtime slot). Metadata only — no body encoding; submit()/requestSubmit()
+    // stay no-ops.
+    if (name == "enctype") {
+        return v8_string(isolate, node_->enctype);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1932,8 +1967,8 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
         return;
     }
     if (name != "textContent" && name != "value" && name != "method" &&
-        name != "action") {
-        return;  // textContent (M2-8) + value (M5-3/4/5) + method/action (M7-3/4)
+        name != "action" && name != "enctype") {
+        return;  // textContent (M2-8) + value (M5-3/4/5) + method/action/enctype (M7)
     }
     std::string str_value;
     v8::Local<v8::String> str;
@@ -1953,6 +1988,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     // URL parsing/normalization; does NOT write the `action` attribute). Form-only.
     if (name == "action") {
         node_->action = str_value;
+        return;
+    }
+    // M7-5: form.enctype = X -> store normalize(String(X)) in the runtime slot only
+    // (does NOT write the `enctype` attribute). Writable only on <form>.
+    if (name == "enctype") {
+        node_->enctype = normalize_form_enctype(str_value);
         return;
     }
     if (name == "value") {
