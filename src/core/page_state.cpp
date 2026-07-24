@@ -389,6 +389,12 @@ struct DomNode {
     // the attribute. Only meaningful for <form> (the property is exposed only there);
     // form.reset() does NOT touch it. Minimal metadata: not "dialog", no other verbs.
     std::string method = "get";
+    // M7-4 <form>.action runtime slot: the raw submission-address string. Seeded ONCE
+    // at parse/create from the `action` attribute verbatim (NO URL parsing / relative-
+    // to-absolute resolution / normalization), defaulting to "" (no attribute /
+    // createElement('form')), then decoupled from the attribute. Only meaningful for
+    // <form> (the property is exposed only there); form.reset() does NOT touch it.
+    std::string action;
     // M6-1 form.reset() baseline: the value/selected/checked snapshot captured at
     // parse/create (after the M5-5 select normalization), FIXED thereafter (it does
     // not follow later attribute/textContent edits). reset() restores value /
@@ -1129,10 +1135,11 @@ public:
             "parentElement", "firstElementChild", "lastElementChild",
             "childElementCount"};
         // M5-1: `elements` is exposed only on <form> (so non-form elements have no
-        // `.elements` property at all). M7-3: `method` (read-write) too.
+        // `.elements` property at all). M7-3/M7-4: `method` / `action` (read-write).
         if (node_->tag == "form") {
             names.push_back("elements");
             names.push_back("method");
+            names.push_back("action");
         }
         // M5-2: `form` (owner-form) is exposed only on the four form controls.
         if (node_->tag == "input" || node_->tag == "button" ||
@@ -1207,9 +1214,10 @@ public:
         if (node_->tag == "input") {
             names.push_back("checked");
         }
-        // M7-3: form.method is read-write (normalized on write).
+        // M7-3/M7-4: form.method (normalized on write) / form.action (raw) are r/w.
         if (node_->tag == "form") {
             names.push_back("method");
+            names.push_back("action");
         }
         return names;
     }
@@ -1276,16 +1284,21 @@ public:
                 }
             }
         }
-        // M7-3: seed each <form>'s .method slot from its `method` attribute
-        // (normalized to "get"/"post"), decoupled from the attribute thereafter.
-        // No attribute -> the default "get" already set on the node stands.
+        // M7-3/M7-4: seed each <form>'s .method / .action slots from the matching
+        // attributes, decoupled from the attribute thereafter. method is normalized
+        // to "get"/"post" (absent -> default "get" stands); action is seeded verbatim
+        // (no URL parsing/normalization; absent -> default "" stands).
         for (const std::unique_ptr<DomNode>& node : pool_) {
             if (node->tag != "form") {
                 continue;
             }
-            const auto it = node->attributes.find("method");
-            if (it != node->attributes.end()) {
-                node->method = normalize_form_method(it->second);
+            const auto mit = node->attributes.find("method");
+            if (mit != node->attributes.end()) {
+                node->method = normalize_form_method(mit->second);
+            }
+            const auto ait = node->attributes.find("action");
+            if (ait != node->attributes.end()) {
+                node->action = ait->second;
             }
         }
         // M6-1: snapshot the form.reset() baseline AFTER seeding + normalization —
@@ -1890,6 +1903,13 @@ v8::Local<v8::Value> ElementHost::get_property(v8::Isolate* isolate,
     if (name == "method") {
         return v8_string(isolate, node_->method);
     }
+    // M7-4: form.action — the current raw submission-address string, read-write,
+    // exposed only on <form>. Decoupled from the `action` attribute (reading returns
+    // the runtime slot, not getAttribute('action')). No URL parsing/normalization.
+    // Pure metadata — it does not trigger submit()/requestSubmit() (both stay no-ops).
+    if (name == "action") {
+        return v8_string(isolate, node_->action);
+    }
     return v8::Undefined(isolate);
 }
 
@@ -1911,8 +1931,9 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
         node_->checked = value->BooleanValue(isolate);
         return;
     }
-    if (name != "textContent" && name != "value" && name != "method") {
-        return;  // textContent (M2-8) + value (M5-3/4/5) + method (M7-3) are writable
+    if (name != "textContent" && name != "value" && name != "method" &&
+        name != "action") {
+        return;  // textContent (M2-8) + value (M5-3/4/5) + method/action (M7-3/4)
     }
     std::string str_value;
     v8::Local<v8::String> str;
@@ -1926,6 +1947,12 @@ void ElementHost::set_property(v8::Isolate* isolate, v8::Local<v8::Context> cont
     // (does NOT write the `method` attribute). Writable only on <form>.
     if (name == "method") {
         node_->method = normalize_form_method(str_value);
+        return;
+    }
+    // M7-4: form.action = X -> store String(X) verbatim in the runtime slot only (no
+    // URL parsing/normalization; does NOT write the `action` attribute). Form-only.
+    if (name == "action") {
+        node_->action = str_value;
         return;
     }
     if (name == "value") {

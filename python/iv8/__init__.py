@@ -596,6 +596,20 @@ not touch it. Works on a detached ``<form>``. Still **no** ``form.action`` /
 ``form.enctype`` / ``form.target`` / ``form.noValidate`` / ``.method`` on any other
 element. No new Python API / top-level object / exception.
 
+M7-4 (form action metadata) adds a read-write string property ``form.action`` exposed
+**only on ``<form>`` elements**. It is seeded once at parse/create from the ``action``
+attribute **verbatim** — this phase does **no** URL parsing, normalization, or
+relative-to-absolute resolution — defaulting to ``""`` (absent attribute or
+``createElement('form')``). Writing ``form.action = X`` stores ``String(X)`` as-is. Like
+``form.method`` it is **decoupled from the attribute** in both directions:
+``form.action = ...`` does not change ``getAttribute('action')``, and
+``setAttribute('action', ...)`` does not change ``form.action``. ``form.action`` and
+``form.method`` are independent of each other. It is pure metadata — reading or writing
+it triggers **no** submission behaviour (``submit()`` / ``requestSubmit()`` stay
+no-ops), and ``form.reset()`` does not touch it. Works on a detached ``<form>``. Still
+**no** ``form.enctype`` / ``form.target`` / ``form.noValidate`` / ``.action`` on any
+other element. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

@@ -39,9 +39,9 @@ def test_forms_is_a_plain_array():
         for member in ("item", "namedItem"):
             assert page.eval(f"typeof document.forms.{member}") == "undefined"
         # <form> gains no form behaviour beyond the minimal entry points
-        # (form.elements M5-1; form.reset() M6-1; form.submit() M7-1;
-        # form.requestSubmit() M7-2). No FormData / action / method surface.
-        assert page.eval("typeof document.forms[0].action") == "undefined"
+        # (form.elements M5-1; reset() M6-1; submit() M7-1; requestSubmit() M7-2;
+        # method M7-3; action M7-4). No FormData / enctype / target surface.
+        assert page.eval("typeof document.forms[0].enctype") == "undefined"
 
 
 # --- fresh document -> empty array ----------------------------------------------

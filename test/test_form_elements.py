@@ -48,8 +48,8 @@ def test_present_only_on_form():
             assert page.eval(
                 f"typeof document.getElementById('f').elements.{member}") == "undefined"
         # (form.reset() M6-1, form.submit() M7-1, form.requestSubmit() M7-2,
-        # form.method M7-3; length / action stay out.)
-        for member in ("length", "action"):
+        # form.method M7-3, form.action M7-4; length / enctype / target stay out.)
+        for member in ("length", "enctype", "target"):
             assert page.eval(f"typeof document.getElementById('f').{member}") == "undefined"
 
 
