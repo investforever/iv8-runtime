@@ -14,6 +14,10 @@
 
 #include "iv8/context_host.h"
 
+// M9-1: V8 Inspector (CDP) attach base. Included after context_host.h so the
+// v8_headers.h COMPILER-macro workaround has already run before any V8 header.
+#include "v8-inspector.h"
+
 namespace py = pybind11;
 
 namespace iv8 {
@@ -3153,11 +3157,136 @@ void atob_callback(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
 }
 
+// M9-1: convert an Inspector StringView (CDP protocol message) to a UTF-8
+// std::string. CDP JSON is normally 8-bit; a 16-bit buffer is transcoded via V8
+// (safe here — sendResponse/sendNotification run inside dispatchProtocolMessage,
+// which we call with the isolate entered and a HandleScope active).
+std::string inspector_sv_to_utf8(v8::Isolate* isolate,
+                                 const v8_inspector::StringView& view) {
+    if (view.is8Bit()) {
+        return std::string(reinterpret_cast<const char*>(view.characters8()),
+                           view.length());
+    }
+    v8::Local<v8::String> str;
+    if (v8::String::NewFromTwoByte(isolate, view.characters16(),
+                                   v8::NewStringType::kNormal,
+                                   static_cast<int>(view.length()))
+            .ToLocal(&str)) {
+        v8::String::Utf8Value utf8(isolate, str);
+        if (*utf8 != nullptr) {
+            return std::string(*utf8, static_cast<std::size_t>(utf8.length()));
+        }
+    }
+    return std::string();
+}
+
+// Minimal Inspector client — every V8InspectorClient method has a default
+// implementation, so the empty subclass is a valid, no-op embedder client (no
+// pause loop; there is no message loop this phase).
+class DevToolsClient : public v8_inspector::V8InspectorClient {};
+
+// Channel that accumulates the session's synchronous outbound CDP messages
+// (responses + notifications) into a buffer the dispatch call drains and returns.
+class DevToolsChannel : public v8_inspector::V8Inspector::Channel {
+public:
+    void set_isolate(v8::Isolate* isolate) { isolate_ = isolate; }
+    std::vector<std::string> take() {
+        std::vector<std::string> out;
+        out.swap(outbox_);
+        return out;
+    }
+    void sendResponse(int /*callId*/,
+                      std::unique_ptr<v8_inspector::StringBuffer> message) override {
+        push(message.get());
+    }
+    void sendNotification(
+        std::unique_ptr<v8_inspector::StringBuffer> message) override {
+        push(message.get());
+    }
+    void flushProtocolNotifications() override {}
+
+private:
+    void push(v8_inspector::StringBuffer* message) {
+        if (message != nullptr) {
+            outbox_.push_back(inspector_sv_to_utf8(isolate_, message->string()));
+        }
+    }
+    v8::Isolate* isolate_ = nullptr;
+    std::vector<std::string> outbox_;
+};
+
 }  // namespace
+
+// M9-1: the current generation's V8 Inspector objects (opaque in the header). The
+// channel is owned by the embedder and must outlive the session; declaration order
+// (channel before session) ensures the session is destroyed first.
+struct DevToolsInspector {
+    DevToolsClient client;
+    DevToolsChannel channel;
+    std::unique_ptr<v8_inspector::V8Inspector> inspector;
+    std::unique_ptr<v8_inspector::V8InspectorSession> session;
+};
 
 PageState::PageState() {
     // Initial page state uses the fixed default base URL and empty document seed.
     install_page(kDefaultBaseUrl, std::string());
+}
+
+void PageState::install_inspector(v8::Isolate* isolate,
+                                  v8::Local<v8::Context> context) {
+    auto inspector = std::make_unique<DevToolsInspector>();
+    inspector->inspector =
+        v8_inspector::V8Inspector::create(isolate, &inspector->client);
+    inspector->channel.set_isolate(isolate);
+    static const char kName[] = "iv8 page";
+    inspector->inspector->contextCreated(v8_inspector::V8ContextInfo(
+        context, /*contextGroupId=*/1,
+        v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kName),
+                                 sizeof(kName) - 1)));
+    inspector_ = std::move(inspector);
+}
+
+bool PageState::devtools_enable() {
+    // Idempotent: once enabled, install_page keeps a fresh Inspector per
+    // generation, so a later call just confirms.
+    if (inspector_) {
+        devtools_enabled_ = true;
+        return true;
+    }
+    // with_scope runs under the operation guard — a disposed page raises
+    // ContextDisposedError here (translated to JSContextDisposedError).
+    state_->with_scope([this](v8::Isolate* isolate, v8::Local<v8::Context> context) {
+        install_inspector(isolate, context);
+    });
+    devtools_enabled_ = true;
+    return true;
+}
+
+py::list PageState::devtools_dispatch(const std::string& message) {
+    if (inspector_ == nullptr) {
+        // Not enabled (devtools_url() never called): nothing to attach to.
+        return py::list();
+    }
+    state_->with_scope([this, &message](v8::Isolate* isolate,
+                                        v8::Local<v8::Context> context) {
+        (void)context;
+        if (!inspector_->session) {
+            inspector_->session = inspector_->inspector->connect(
+                /*contextGroupId=*/1, &inspector_->channel,
+                v8_inspector::StringView(),
+                v8_inspector::V8Inspector::kFullyTrusted);
+        }
+        inspector_->channel.set_isolate(isolate);
+        inspector_->session->dispatchProtocolMessage(v8_inspector::StringView(
+            reinterpret_cast<const uint8_t*>(message.data()), message.size()));
+    });
+    // Drain the synchronously-produced outbound messages (GIL is held — this runs
+    // on the caller's thread inside the pybind trampoline).
+    py::list out;
+    for (const std::string& frame : inspector_->channel.take()) {
+        out.append(py::str(frame));
+    }
+    return out;
 }
 
 void PageState::install_page(const std::string& base_url,
@@ -3171,6 +3300,13 @@ void PageState::install_page(const std::string& base_url,
     // whatever this generation installed below. DocumentHost forwards to its
     // wrapped elements; window_events_ holds window's listeners.
     state_->set_on_teardown([this]() {
+        // M9-1: tear down this generation's Inspector (session before inspector)
+        // while the isolate is still alive, before releasing host handles.
+        if (inspector_) {
+            inspector_->session.reset();
+            inspector_->inspector.reset();
+            inspector_.reset();
+        }
         for (const std::unique_ptr<HostObject>& host : host_objects_) {
             host->release_v8_handles();
         }
@@ -3325,6 +3461,13 @@ void PageState::install_page(const std::string& base_url,
                                     &btoa_callback);
             install_global_function(isolate, context, global, "atob",
                                     &atob_callback);
+
+            // M9-1: if DevTools was enabled on a prior generation, give this fresh
+            // generation its own Inspector + registered context (the WS URL stays
+            // stable Python-side). When never enabled, this is skipped entirely.
+            if (devtools_enabled_) {
+                install_inspector(isolate, context);
+            }
         });
 }
 

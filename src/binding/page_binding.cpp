@@ -22,5 +22,9 @@ void register_page(py::module_& module) {
              &iv8::PageState::dispatch_lifecycle_events)
         .def("html_scripts", &iv8::PageState::html_scripts)
         .def("run_html_script", &iv8::PageState::run_html_script, py::arg("index"),
-             py::arg("code"), py::arg("name"));
+             py::arg("code"), py::arg("name"))
+        // M9-1 DevTools attach base (internal; public surface is Page.devtools_url()).
+        .def("devtools_enable", &iv8::PageState::devtools_enable)
+        .def("devtools_dispatch", &iv8::PageState::devtools_dispatch,
+             py::arg("message"));
 }

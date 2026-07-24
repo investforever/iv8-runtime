@@ -93,6 +93,9 @@ class Page:
         # M3-2 page lifecycle: a fresh page has its (blank) default generation
         # installed, so it starts "complete". load() drives loading -> complete.
         self._ready_state = "complete"
+        # M9-1 DevTools: lazily created by devtools_url() (None => never enabled,
+        # so the Inspector + local server are never started; zero runtime impact).
+        self._devtools = None
 
     @property
     def disposed(self) -> bool:
@@ -278,8 +281,42 @@ class Page:
         self._native.dispatch_lifecycle_events()
         self._ready_state = "complete"
 
+    def devtools_url(self) -> str:
+        """Lazily start this page's DevTools/Inspector attach base and return the
+        WebSocket URL an external CDP client can connect to.
+
+        The first call starts a minimal localhost server (Chrome DevTools Protocol
+        discovery at ``/json/version`` + ``/json`` / ``/json/list``, plus a
+        WebSocket endpoint bridged to this page's V8 Inspector) and creates the
+        Inspector for the current context; later calls on the same ``Page`` return
+        the **same** URL. The URL stays stable across ``load()`` (each generation
+        gets a fresh Inspector behind the same endpoint). If never called, the
+        Inspector and server are never started and runtime behavior is unchanged.
+
+        This is an *attach base* only — there is no message loop, so without an
+        external client driving it, and for asynchronous CDP events, behavior is
+        best-effort; synchronous CDP request/response works. It does not pause
+        execution, alter ``debugger;`` / ``console`` semantics, or add any JS
+        global. Raises ``JSContextDisposedError`` after ``dispose()``.
+        """
+        if self._native.disposed:
+            raise JSContextDisposedError("Page is disposed")
+        if self._devtools is None:
+            # Enable the native Inspector for the current generation, then start
+            # the local discovery/WS server bridged to its CDP dispatch.
+            self._native.devtools_enable()
+            from ._devtools import DevToolsServer
+
+            self._devtools = DevToolsServer(self._native.devtools_dispatch)
+        return self._devtools.ws_url()
+
     def dispose(self) -> None:
         """Release the page's context-owned native resources. Idempotent."""
+        # M9-1: stop the DevTools server first (best-effort) so its port is freed;
+        # the native Inspector is torn down with the context by dispose() below.
+        if self._devtools is not None:
+            self._devtools.shutdown()
+            self._devtools = None
         self._native.dispose()
 
     def __enter__(self) -> "Page":

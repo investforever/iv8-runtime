@@ -12,6 +12,10 @@
 namespace iv8 {
 
 class ContextState;
+// M9-1 opaque holder for the V8 Inspector objects (defined in page_state.cpp so
+// v8-inspector.h stays out of this header). Destroyed via the out-of-line
+// ~PageState / the context teardown hook while the isolate is still alive.
+struct DevToolsInspector;
 
 // M2-1 native page state. A Page is the M2 container that owns one execution
 // context (the M1 ContextState) plus the host objects installed into it. This
@@ -73,11 +77,30 @@ public:
     void run_html_script(std::size_t index, const std::string& code,
                          const std::string& name);
 
+    // M9-1: DevTools/Inspector attach base (native side of Page.devtools_url()).
+    // Idempotent lazy enable: on first call, create a V8 Inspector for the current
+    // generation and register its context; subsequent generations (load()) get a
+    // fresh Inspector automatically while enabled. Zero effect until called.
+    // Reuses the operation guard, so a disposed page raises JSContextDisposedError.
+    bool devtools_enable();
+    // Dispatch one CDP protocol message into the current generation's Inspector
+    // session (lazily connected) and return the synchronously-produced outbound
+    // messages (responses/notifications) as a list of str. Runs under the
+    // operation guard (busy -> JSContextBusyError, disposed ->
+    // JSContextDisposedError). Best-effort: without a message loop, only
+    // synchronous CDP responses are returned this phase.
+    pybind11::list devtools_dispatch(const std::string& message);
+
 private:
     // Build a fresh ContextState for `base_url` (location source) and install the
     // page's host objects + global roots + timers into it. Used by the ctor and
     // by load().
     void install_page(const std::string& base_url, const std::string& html);
+
+    // M9-1: (re)create the V8 Inspector for the just-installed generation and
+    // register `context`. Called from install_page (when devtools is enabled) and
+    // from devtools_enable(); both already hold the isolate scope.
+    void install_inspector(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
     // Minimal internal page root state captured by load() — the seed for a later
     // document bootstrap. Intentionally NOT exposed (no public document surface
@@ -102,6 +125,12 @@ private:
     // used to dispatch DOMContentLoaded. Reset on each install_page.
     HostObject* document_host_ = nullptr;
     [[maybe_unused]] PageBootstrap bootstrap_;
+    // M9-1 DevTools: enabled once Page.devtools_url() is called; then every
+    // generation installs a fresh Inspector. inspector_ holds the current
+    // generation's Inspector objects and is reset (session then inspector) by the
+    // context teardown hook BEFORE the isolate is disposed.
+    bool devtools_enabled_ = false;
+    std::unique_ptr<DevToolsInspector> inspector_;
 };
 
 }  // namespace iv8
