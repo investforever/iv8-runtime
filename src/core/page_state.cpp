@@ -2781,7 +2781,13 @@ std::string usp_encode(const std::string& s) {
     static const char kHex[] = "0123456789ABCDEF";
     std::string out;
     for (unsigned char c : s) {
-        if (std::isalnum(c) || c == '*' || c == '-' || c == '.' || c == '_') {
+        // Explicit ASCII test — std::isalnum is locale-dependent for bytes > 0x7F
+        // (e.g. it treats the UTF-8 lead byte 0xC3 as alphanumeric under some Windows
+        // locales), which would leak raw multi-byte bytes into the output.
+        const bool unreserved =
+            (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') || c == '*' || c == '-' || c == '.' || c == '_';
+        if (unreserved) {
             out += static_cast<char>(c);
         } else if (c == ' ') {
             out += '+';
