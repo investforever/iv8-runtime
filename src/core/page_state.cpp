@@ -1165,10 +1165,11 @@ public:
             "matches",
             // M4-B-4 nearest-ancestor selector match.
             "closest"};
-        // M6-1: reset() is exposed only on <form>; M7-1: submit() too.
+        // M6-1: reset() is exposed only on <form>; M7-1: submit(); M7-2: requestSubmit().
         if (node_->tag == "form") {
             names.push_back("reset");
             names.push_back("submit");
+            names.push_back("requestSubmit");
         }
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
@@ -2144,6 +2145,15 @@ v8::Local<v8::Value> ElementHost::call_method(
     // change any control's live value / default baseline — a deliberate no-op this
     // phase. Callable on attached and detached forms.
     if (name == "submit") {
+        return v8::Undefined(isolate);
+    }
+    // M7-2 form.requestSubmit() (exposed only on <form>): like submit(), a minimal
+    // "exists and is callable" entry point. This phase supports only the no-argument
+    // call; it returns undefined and is a deliberate no-op — no submitter handling,
+    // no submit/input/change/reset event, no validation, no navigation / network /
+    // FormData, and no change to any control's live value / default baseline.
+    // Callable on attached and detached forms; result matches submit().
+    if (name == "requestSubmit") {
         return v8::Undefined(isolate);
     }
     return v8::Undefined(isolate);

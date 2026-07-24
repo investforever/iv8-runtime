@@ -1,11 +1,12 @@
-"""M7-1 acceptance tests: form.submit() — minimal submission entry point.
+"""M7-2 acceptance tests: form.requestSubmit() — minimal request-submit entry point.
 
-form.submit() (exposed only on <form>) takes no args, returns undefined, and is a
-deliberate no-op this phase: it does NOT navigate, make a network request, dispatch a
-submit event (no listener fires), run validation, or change any control's live value
-or default baseline. Callable on both attached and detached forms; the call itself
-never throws (existing dispose / stale error paths are unchanged). JS-side only; no
-new Python surface, no requestSubmit / submit event / FormData / HTMLFormElement.
+form.requestSubmit() (exposed only on <form>) supports only the no-argument call this
+phase: it returns undefined and is a deliberate no-op whose result matches
+form.submit(). It does NOT take/validate a submitter, dispatch a submit/input/change/
+reset event, run validation, navigate, make a network request, build FormData, or
+change any control's live value or default baseline. Callable on both attached and
+detached forms; the call itself never throws (existing dispose / stale error paths are
+unchanged). JS-side only; no new Python surface, no submitter semantics, no FormData.
 
 Assertions use .id / .value / .checked / typeof / return-value only.
 """
@@ -17,7 +18,7 @@ import iv8
 v8_linked = getattr(iv8, "_v8_linked", False)
 on_only = pytest.mark.skipif(not v8_linked, reason="requires a V8-linked build")
 
-BASE = "https://formsubmit.test/"
+BASE = "https://formrequestsubmit.test/"
 
 
 # --- API-shape guard (both build modes) -----------------------------------------
@@ -25,31 +26,32 @@ BASE = "https://formsubmit.test/"
 def test_no_new_python_surface():
     for name in ("Document", "Element", "HTMLFormElement", "FormData"):
         assert not hasattr(iv8, name)
-    assert not hasattr(iv8.Page, "submit")
+    assert not hasattr(iv8.Page, "requestSubmit")
 
 
-# --- .submit only on <form>, absent on non-form ---------------------------------
+# --- .requestSubmit only on <form>, absent on non-form --------------------------
 
 @on_only
-def test_submit_only_on_form():
+def test_request_submit_only_on_form():
     html = ("<html><body><form id='f'></form>"
             "<input id='in'><button id='bt'></button><div id='dv'></div>"
             "</body></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        assert page.eval("typeof document.getElementById('f').submit") == "function"
-        # non-form elements (incl. controls) get no .submit
+        assert page.eval("typeof document.getElementById('f').requestSubmit") == "function"
+        # non-form elements (incl. controls) get no .requestSubmit
         for eid in ("in", "bt", "dv"):
-            assert page.eval(f"typeof document.getElementById('{eid}').submit") == "undefined"
+            assert page.eval(
+                f"typeof document.getElementById('{eid}').requestSubmit") == "undefined"
 
 
-# --- empty form: callable, returns undefined ------------------------------------
+# --- no-argument call returns undefined -----------------------------------------
 
 @on_only
-def test_empty_form_submit_returns_undefined():
+def test_no_arg_call_returns_undefined():
     with iv8.Page() as page:
         page.load(html="<html><body><form id='f'></form></body></html>", base_url=BASE)
-        result = page.eval("document.getElementById('f').submit()")
+        result = page.eval("document.getElementById('f').requestSubmit()")
         assert result is iv8.JSUndefined
 
 
@@ -65,7 +67,7 @@ def test_attached_and_detached_callable():
             """
             (() => {
               const f = document.getElementById('f');
-              const r = f.submit();
+              const r = f.requestSubmit();
               return [f.isConnected, r === undefined].join(',');   // true,true
             })();
             """
@@ -75,14 +77,14 @@ def test_attached_and_detached_callable():
             """
             (() => {
               const f = document.createElement('form');
-              const r = f.submit();
+              const r = f.requestSubmit();
               return [f.isConnected, r === undefined].join(',');   // false,true
             })();
             """
         ) == "false,true"
 
 
-# --- live control state is unchanged by submit() --------------------------------
+# --- live control state is unchanged by requestSubmit() -------------------------
 
 @on_only
 def test_live_state_unchanged():
@@ -99,12 +101,11 @@ def test_live_state_unchanged():
             """
             (() => {
               const g = document.getElementById.bind(document);
-              // mutate live state away from the seeds
               g('in').value = 'changed';
               g('ck').checked = true;
               g('ta').value = 'edited';
               g('se').value = 'b';
-              g('f').submit();                         // must not touch any of it
+              g('f').requestSubmit();                  // must not touch any of it
               return [g('in').value, g('ck').checked,
                       g('ta').value, g('se').value].join('|');
             })();
@@ -112,7 +113,7 @@ def test_live_state_unchanged():
         ) == "changed|true|edited|b"
 
 
-# --- default baselines are unchanged by submit() --------------------------------
+# --- default baselines are unchanged by requestSubmit() -------------------------
 
 @on_only
 def test_default_baselines_unchanged():
@@ -130,8 +131,7 @@ def test_default_baselines_unchanged():
               g('in').value = 'changed';
               g('ck').checked = false;
               g('ta').value = 'edited';
-              g('f').submit();
-              // default* still reflect the fixed parse-time baseline
+              g('f').requestSubmit();
               return [g('in').defaultValue, g('ck').defaultChecked,
                       g('ta').defaultValue].join('|');
             })();
@@ -139,27 +139,70 @@ def test_default_baselines_unchanged():
         ) == "seed|true|t0"
 
 
-# --- submit() does not auto-dispatch a submit listener --------------------------
+# --- requestSubmit() dispatches no submit/input/change/reset listener -----------
 
 @on_only
-def test_no_auto_submit_listener():
+def test_no_auto_event_listeners():
     html = "<html><body><form id='f'><input id='i'></form></body></html>"
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
         assert page.eval(
             """
             (() => {
-              globalThis.fired = 0;
+              globalThis.hits = [];
               const f = document.getElementById('f');
-              f.addEventListener('submit', () => { globalThis.fired++; });
-              f.submit();
-              return globalThis.fired;                 // 0 — no auto-dispatch
+              for (const t of ['submit', 'input', 'change', 'reset']) {
+                f.addEventListener(t, () => globalThis.hits.push(t));
+              }
+              f.requestSubmit();
+              return globalThis.hits.length;           // 0 — no auto-dispatch
             })();
             """
         ) == 0
 
 
-# --- a <script> in the form subtree stays inert across submit() -----------------
+# --- no navigation / network / FormData surface introduced ----------------------
+
+@on_only
+def test_no_navigation_network_formdata_surface():
+    html = "<html><body><form id='f'><input id='i'></form></body></html>"
+    with iv8.Page() as page:
+        page.load(html=html, base_url=BASE)
+        # calling it does not add form submission machinery
+        assert page.eval(
+            """
+            (() => {
+              const f = document.getElementById('f');
+              f.requestSubmit();
+              return [typeof globalThis.FormData,          // undefined (not introduced)
+                      typeof f.action,                     // undefined
+                      typeof f.method,                     // undefined
+                      typeof f.checkValidity].join(',');   // undefined
+            })();
+            """
+        ) == "undefined,undefined,undefined,undefined"
+
+
+# --- result matches form.submit() (both no-op undefined) ------------------------
+
+@on_only
+def test_result_matches_submit():
+    html = "<html><body><form id='f'><input id='i' value='x'></form></body></html>"
+    with iv8.Page() as page:
+        page.load(html=html, base_url=BASE)
+        assert page.eval(
+            """
+            (() => {
+              const f = document.getElementById('f');
+              const a = f.submit();
+              const b = f.requestSubmit();
+              return [a === undefined, b === undefined, a === b].join(',');
+            })();
+            """
+        ) == "true,true,true"
+
+
+# --- a <script> in the form subtree stays inert across requestSubmit() ----------
 
 @on_only
 def test_script_in_form_inert():
@@ -174,7 +217,7 @@ def test_script_in_form_inert():
               const s = document.createElement('script');
               s.textContent = 'globalThis.ran = 1;';
               f.appendChild(s);
-              f.submit();
+              f.requestSubmit();
               return [globalThis.ran === 0,             // never ran
                       document.currentScript === null].join(',');
             })();
@@ -182,16 +225,40 @@ def test_script_in_form_inert():
         ) == "true,true"
 
 
-# --- repeated load re-establishes a callable submit -----------------------------
+# --- no submitter parameter semantics -------------------------------------------
+
+@on_only
+def test_no_submitter_semantics():
+    html = ("<html><body><form id='f'>"
+            "<button id='b1'></button><button id='b2'></button>"
+            "</form></body></html>")
+    with iv8.Page() as page:
+        page.load(html=html, base_url=BASE)
+        # requestSubmit(submitter) is not supported this phase: the no-arg call is
+        # the only contract, and it neither records a submitter nor exposes one.
+        assert page.eval(
+            """
+            (() => {
+              const f = document.getElementById('f');
+              const r = f.requestSubmit();             // no-arg only
+              return [r === undefined,
+                      typeof f.submitter,              // undefined (no slot)
+                      'submitter' in f].join(',');     // false
+            })();
+            """
+        ) == "true,undefined,false"
+
+
+# --- repeated load re-establishes a callable requestSubmit ----------------------
 
 @on_only
 def test_repeated_load():
     with iv8.Page() as page:
         page.load(html="<html><body><form id='f'></form></body></html>", base_url=BASE)
-        assert page.eval("document.getElementById('f').submit()") is iv8.JSUndefined
+        assert page.eval("document.getElementById('f').requestSubmit()") is iv8.JSUndefined
         page.load(html="<html><body><form id='g'></form></body></html>", base_url=BASE)
-        assert page.eval("typeof document.getElementById('g').submit") == "function"
-        assert page.eval("document.getElementById('g').submit()") is iv8.JSUndefined
+        assert page.eval("typeof document.getElementById('g').requestSubmit") == "function"
+        assert page.eval("document.getElementById('g').requestSubmit()") is iv8.JSUndefined
 
 
 # --- failed load keeps the current (failed) tree's form callable ----------------
@@ -204,7 +271,7 @@ def test_failed_load_keeps_form_callable():
         with pytest.raises(iv8.JSError):
             page.load(html=html, base_url=BASE)
         assert page.eval("document.readyState") == "loading"
-        assert page.eval("document.getElementById('f').submit()") is iv8.JSUndefined
+        assert page.eval("document.getElementById('f').requestSubmit()") is iv8.JSUndefined
 
 
 # --- stale rules -----------------------------------------------------------------

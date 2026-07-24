@@ -77,8 +77,8 @@ def test_frozen_items_absent():
             "</form></body></html>")
     with iv8.Page() as page:
         page.load(html=html, base_url=BASE)
-        # form: no requestSubmit / validation (form.submit() arrived in M7-1)
-        for m in ("requestSubmit", "checkValidity", "reportValidity"):
+        # form: no validation surface (form.submit() M7-1, form.requestSubmit() M7-2)
+        for m in ("checkValidity", "reportValidity"):
             assert page.eval(f"typeof document.getElementById('f').{m}") == "undefined"
         # button / option do NOT get defaultValue; option has no defaultValue
         assert page.eval("typeof document.getElementById('bt').defaultValue") == "undefined"

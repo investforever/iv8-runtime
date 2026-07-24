@@ -38,10 +38,10 @@ def test_forms_is_a_plain_array():
         assert page.eval("Array.isArray(document.forms)") is True
         for member in ("item", "namedItem"):
             assert page.eval(f"typeof document.forms.{member}") == "undefined"
-        # <form> gains no form behaviour — it is a plain element. (form.elements
-        # arrived in M5-1; form.submit()/reset() arrived in M7-1/M6-1;
-        # requestSubmit stays out.)
-        assert page.eval("typeof document.forms[0].requestSubmit") == "undefined"
+        # <form> gains no form behaviour beyond the minimal entry points
+        # (form.elements M5-1; form.reset() M6-1; form.submit() M7-1;
+        # form.requestSubmit() M7-2). No FormData / action / method surface.
+        assert page.eval("typeof document.forms[0].action") == "undefined"
 
 
 # --- fresh document -> empty array ----------------------------------------------

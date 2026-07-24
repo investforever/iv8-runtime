@@ -569,6 +569,19 @@ unchanged). Still **no** ``form.requestSubmit()`` / ``submit`` event /
 ``checkValidity()`` / submitter / ``enctype`` / ``FormData`` / navigation /
 specialized ``HTMLFormElement``. No new Python API / top-level object / exception.
 
+M7-2 (form request-submit) adds a method ``form.requestSubmit()`` exposed **only on
+``<form>`` elements**. Like ``form.submit()`` it is a minimal *"exists and is
+callable"* entry point: this phase supports only the **no-argument** call, returns
+``undefined``, and is a deliberate **no-op** — its result matches ``form.submit()``.
+It does **not** take or validate a submitter, dispatch a ``submit`` / ``input`` /
+``change`` / ``reset`` event, run validation, navigate, make a network request, build
+``FormData``, or change any control's live value / ``default*`` baseline. Callable on
+both attached and detached ``<form>`` elements; the call itself never throws (the
+existing dispose / stale error paths are unchanged). Still **no**
+``requestSubmit(submitter)`` / ``event.submitter`` / ``submit`` event /
+``checkValidity()`` / ``FormData`` / ``action`` / ``method`` / ``enctype``. No new
+Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free
