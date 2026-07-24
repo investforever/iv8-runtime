@@ -226,8 +226,8 @@ def test_requires_new():
 def test_no_searchparams_or_setters_surface():
     with iv8.Page() as page:
         page.load(html="<html><body></body></html>", base_url=BASE)
-        # no URLSearchParams global; no searchParams / port / username / password
-        assert page.eval("typeof globalThis.URLSearchParams") == "undefined"
+        # URL itself gains no searchParams / port / username / password (the standalone
+        # URLSearchParams global arrived in M8-3 but is NOT linked to URL here).
         assert page.eval(
             """
             (() => {

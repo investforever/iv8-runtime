@@ -687,6 +687,26 @@ decomposition — **no** navigation, network, or resource loading. Still **no**
 setter / ``createObjectURL`` / ``Blob`` / ``File`` / ``fetch``. No new Python API /
 top-level object / exception (construction failure surfaces as a JS ``TypeError``).
 
+M8-3 (URLSearchParams) adds a JS-side global ``URLSearchParams`` constructor with a
+minimal ``application/x-www-form-urlencoded`` parameter object. ``new
+URLSearchParams(init?)``: ``undefined`` / ``null`` / omitted → empty; another
+``URLSearchParams`` → a copy of its current parameters; a **string** (via
+``String(init)``, a leading ``?`` dropped) → parsed as a query; any other object
+(record / pair-list / …) → **``TypeError``** (as is calling without ``new``). Parsing
+splits on ``&`` (empty segments skipped) then the first ``=``; a missing ``=`` gives an
+empty value. Instance methods (all names/values via ``String(...)``): ``get(name)``
+(first value or ``null``), ``getAll(name)`` (a plain ``Array``), ``has(name)``
+(boolean), ``append(name, value)``, ``set(name, value)`` (replaces the first
+same-named entry in place and drops the rest), ``delete(name)`` (drops all same-named),
+and ``toString()`` (the encoded query, **no** leading ``?``). Percent 口径 (fixed):
+decode turns ``+`` into space and ``%XX`` into a byte (a malformed ``%`` stays
+literal); encode passes ``[A-Za-z0-9*-._]`` through, space → ``+``, every other byte →
+uppercase ``%XX``. It is **not** linked to ``URL`` (``url.searchParams`` is still
+absent). Still **no** iterator / ``entries`` / ``keys`` / ``values`` / ``forEach`` /
+``sort`` / ``size`` / ``record`` or pair-list init / ``FormData`` / ``fetch``. No new
+Python API / top-level object / exception (unsupported init surfaces as a JS
+``TypeError``).
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

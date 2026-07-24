@@ -2741,6 +2741,264 @@ void url_to_href(const v8::FunctionCallbackInfo<v8::Value>& info) {
     }
 }
 
+// M8-3 URLSearchParams — a minimal application/x-www-form-urlencoded query-parameter
+// object. The parameter list is kept as a canonical (re-serialized) query string in a
+// private slot on the instance (GC-managed, invisible to JS); each method parses it,
+// operates, and (for mutators) writes it back. percent 口径: decode '+' -> space and
+// %XX -> byte (bad/short % left literal); encode passes [A-Za-z0-9*-._] through, space
+// -> '+', every other byte -> %XX (uppercase). No iterator / entries / keys / values /
+// forEach / sort / size, and no link to URL.searchParams.
+int usp_hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+std::string usp_decode(const std::string& s) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size(); i++) {
+        const char c = s[i];
+        if (c == '+') {
+            out += ' ';
+        } else if (c == '%' && i + 2 < s.size()) {
+            const int hi = usp_hex_val(s[i + 1]);
+            const int lo = usp_hex_val(s[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out += static_cast<char>((hi << 4) | lo);
+                i += 2;
+            } else {
+                out += c;
+            }
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+std::string usp_encode(const std::string& s) {
+    static const char kHex[] = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '*' || c == '-' || c == '.' || c == '_') {
+            out += static_cast<char>(c);
+        } else if (c == ' ') {
+            out += '+';
+        } else {
+            out += '%';
+            out += kHex[c >> 4];
+            out += kHex[c & 0x0F];
+        }
+    }
+    return out;
+}
+
+std::vector<std::pair<std::string, std::string>> usp_parse(const std::string& q) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t amp = q.find('&', start);
+        const std::string token = (amp == std::string::npos)
+                                      ? q.substr(start)
+                                      : q.substr(start, amp - start);
+        if (!token.empty()) {
+            const auto eq = token.find('=');
+            if (eq == std::string::npos) {
+                out.emplace_back(usp_decode(token), std::string());
+            } else {
+                out.emplace_back(usp_decode(token.substr(0, eq)),
+                                 usp_decode(token.substr(eq + 1)));
+            }
+        }
+        if (amp == std::string::npos) break;
+        start = amp + 1;
+    }
+    return out;
+}
+
+std::string usp_serialize(
+    const std::vector<std::pair<std::string, std::string>>& pairs) {
+    std::string out;
+    for (std::size_t i = 0; i < pairs.size(); i++) {
+        if (i > 0) out += '&';
+        out += usp_encode(pairs[i].first);
+        out += '=';
+        out += usp_encode(pairs[i].second);
+    }
+    return out;
+}
+
+v8::Local<v8::Private> usp_private_key(v8::Isolate* isolate) {
+    return v8::Private::ForApi(
+        isolate,
+        v8::String::NewFromUtf8Literal(isolate, "iv8::URLSearchParams::state"));
+}
+
+std::string usp_read_state(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                           v8::Local<v8::Object> self) {
+    v8::Local<v8::Value> v;
+    if (self->GetPrivate(context, usp_private_key(isolate)).ToLocal(&v) &&
+        v->IsString()) {
+        v8::String::Utf8Value utf8(isolate, v);
+        if (*utf8 != nullptr) {
+            return std::string(*utf8, static_cast<std::size_t>(utf8.length()));
+        }
+    }
+    return std::string();
+}
+
+void usp_write_state(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                     v8::Local<v8::Object> self, const std::string& s) {
+    (void)self->SetPrivate(context, usp_private_key(isolate), v8_string(isolate, s));
+}
+
+std::string usp_arg_string(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                           v8::Local<v8::Value> v) {
+    v8::Local<v8::String> str;
+    if (!v->ToString(context).ToLocal(&str)) {
+        return std::string();
+    }
+    v8::String::Utf8Value utf8(isolate, str);
+    return (*utf8 != nullptr)
+               ? std::string(*utf8, static_cast<std::size_t>(utf8.length()))
+               : std::string();
+}
+
+// `new URLSearchParams(init?)`. undefined/null/absent -> empty; another
+// URLSearchParams -> copy; a string (via String()) -> parsed (a leading '?' is
+// dropped); any other object (record / pair-list / etc.) -> TypeError. Requires new.
+void url_search_params_constructor(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (!info.IsConstructCall()) {
+        isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(
+                isolate, "URLSearchParams constructor requires 'new'")));
+        return;
+    }
+    v8::Local<v8::Object> self = info.This();
+    v8::Local<v8::Value> init = info[0];
+    std::string canonical;
+    if (info.Length() == 0 || init->IsUndefined() || init->IsNull()) {
+        canonical = std::string();
+    } else if (init->IsObject()) {
+        v8::Local<v8::Object> obj = init.As<v8::Object>();
+        const v8::Maybe<bool> has = obj->HasPrivate(context, usp_private_key(isolate));
+        if (has.IsJust() && has.FromJust()) {
+            canonical = usp_read_state(isolate, context, obj);  // copy another USP
+        } else {
+            isolate->ThrowException(v8::Exception::TypeError(
+                v8::String::NewFromUtf8Literal(
+                    isolate, "URLSearchParams: unsupported init (only a string or "
+                             "another URLSearchParams)")));
+            return;
+        }
+    } else {
+        std::string str = usp_arg_string(isolate, context, init);
+        if (!str.empty() && str[0] == '?') {
+            str = str.substr(1);
+        }
+        canonical = usp_serialize(usp_parse(str));  // canonicalize
+    }
+    usp_write_state(isolate, context, self, canonical);
+}
+
+void usp_get(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    for (const auto& p : usp_parse(usp_read_state(isolate, context, info.This()))) {
+        if (p.first == name) {
+            info.GetReturnValue().Set(v8_string(isolate, p.second));
+            return;
+        }
+    }
+    info.GetReturnValue().Set(v8::Null(isolate));
+}
+
+void usp_get_all(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    v8::Local<v8::Array> arr = v8::Array::New(isolate);
+    std::uint32_t idx = 0;
+    for (const auto& p : usp_parse(usp_read_state(isolate, context, info.This()))) {
+        if (p.first == name) {
+            (void)arr->Set(context, idx++, v8_string(isolate, p.second));
+        }
+    }
+    info.GetReturnValue().Set(arr);
+}
+
+void usp_has(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    for (const auto& p : usp_parse(usp_read_state(isolate, context, info.This()))) {
+        if (p.first == name) {
+            info.GetReturnValue().Set(true);
+            return;
+        }
+    }
+    info.GetReturnValue().Set(false);
+}
+
+void usp_append(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    const std::string value = usp_arg_string(isolate, context, info[1]);
+    auto pairs = usp_parse(usp_read_state(isolate, context, info.This()));
+    pairs.emplace_back(name, value);
+    usp_write_state(isolate, context, info.This(), usp_serialize(pairs));
+}
+
+void usp_set(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    const std::string value = usp_arg_string(isolate, context, info[1]);
+    const auto pairs = usp_parse(usp_read_state(isolate, context, info.This()));
+    std::vector<std::pair<std::string, std::string>> out;
+    bool replaced = false;
+    for (const auto& p : pairs) {
+        if (p.first == name) {
+            if (!replaced) {  // keep the first occurrence's position, drop the rest
+                out.emplace_back(name, value);
+                replaced = true;
+            }
+        } else {
+            out.push_back(p);
+        }
+    }
+    if (!replaced) {
+        out.emplace_back(name, value);
+    }
+    usp_write_state(isolate, context, info.This(), usp_serialize(out));
+}
+
+void usp_delete(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    const std::string name = usp_arg_string(isolate, context, info[0]);
+    const auto pairs = usp_parse(usp_read_state(isolate, context, info.This()));
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& p : pairs) {
+        if (p.first != name) {
+            out.push_back(p);
+        }
+    }
+    usp_write_state(isolate, context, info.This(), usp_serialize(out));
+}
+
+void usp_to_string(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    info.GetReturnValue().Set(
+        v8_string(isolate, usp_read_state(isolate, context, info.This())));
+}
+
 }  // namespace
 
 PageState::PageState() {
@@ -2879,6 +3137,33 @@ void PageState::install_page(const std::string& base_url,
                 (void)global->Set(
                     context, v8_string(isolate, "URL"),
                     url_tpl->GetFunction(context).ToLocalChecked());
+            }
+
+            // M8-3 global URLSearchParams: constructor + the seven query-parameter
+            // methods on the prototype. Per-instance state lives in a private slot.
+            {
+                v8::Local<v8::FunctionTemplate> usp_tpl =
+                    v8::FunctionTemplate::New(isolate,
+                                              &url_search_params_constructor);
+                usp_tpl->SetClassName(
+                    v8::String::NewFromUtf8Literal(isolate, "URLSearchParams"));
+                v8::Local<v8::ObjectTemplate> usp_proto =
+                    usp_tpl->PrototypeTemplate();
+                const auto add_method = [&](const char* name,
+                                            v8::FunctionCallback cb) {
+                    usp_proto->Set(isolate, name,
+                                   v8::FunctionTemplate::New(isolate, cb));
+                };
+                add_method("get", &usp_get);
+                add_method("getAll", &usp_get_all);
+                add_method("has", &usp_has);
+                add_method("set", &usp_set);
+                add_method("append", &usp_append);
+                add_method("delete", &usp_delete);
+                add_method("toString", &usp_to_string);
+                (void)global->Set(
+                    context, v8_string(isolate, "URLSearchParams"),
+                    usp_tpl->GetFunction(context).ToLocalChecked());
             }
         });
 }
