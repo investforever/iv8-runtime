@@ -558,6 +558,17 @@ repeated ``load()`` / ``createElement`` establishes each new node's own baseline
 Still **no** ``button.defaultValue`` / a writable default / specialized
 ``HTMLTextAreaElement``. No new Python API / top-level object / exception.
 
+M7-1 (form submit) adds a method ``form.submit()`` exposed **only on ``<form>``
+elements** (no other element gains it). It is a minimal *"exists and is callable"*
+submission entry point: no arguments, returns ``undefined``, and is a deliberate
+**no-op** this phase. It does **not** navigate, make a network request, dispatch a
+``submit`` event (no listener fires), run validation, or change any control's live
+value or ``default*`` baseline. Callable on both attached and detached ``<form>``
+elements; the call itself never throws (the existing dispose / stale error paths are
+unchanged). Still **no** ``form.requestSubmit()`` / ``submit`` event /
+``checkValidity()`` / submitter / ``enctype`` / ``FormData`` / navigation /
+specialized ``HTMLFormElement``. No new Python API / top-level object / exception.
+
 ``JSContext``, ``JSContextDisposedError``, ``JSContextBusyError``,
 ``JSConversionError``, ``JSError``, ``JSUndefined``, ``JSValue``, and ``Page`` are
 exported in BOTH build modes so the public API shape is stable. In a V8-free

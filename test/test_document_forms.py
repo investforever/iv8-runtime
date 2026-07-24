@@ -39,8 +39,9 @@ def test_forms_is_a_plain_array():
         for member in ("item", "namedItem"):
             assert page.eval(f"typeof document.forms.{member}") == "undefined"
         # <form> gains no form behaviour — it is a plain element. (form.elements
-        # arrived in M5-1 — see test_form_elements.py; submit et al. stay out.)
-        assert page.eval("typeof document.forms[0].submit") == "undefined"
+        # arrived in M5-1; form.submit()/reset() arrived in M7-1/M6-1;
+        # requestSubmit stays out.)
+        assert page.eval("typeof document.forms[0].requestSubmit") == "undefined"
 
 
 # --- fresh document -> empty array ----------------------------------------------

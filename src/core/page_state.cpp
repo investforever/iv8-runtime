@@ -1165,9 +1165,10 @@ public:
             "matches",
             // M4-B-4 nearest-ancestor selector match.
             "closest"};
-        // M6-1: reset() is exposed only on <form>.
+        // M6-1: reset() is exposed only on <form>; M7-1: submit() too.
         if (node_->tag == "form") {
             names.push_back("reset");
+            names.push_back("submit");
         }
         const std::vector<std::string>& events = event_method_names();
         names.insert(names.end(), events.begin(), events.end());
@@ -2135,6 +2136,14 @@ v8::Local<v8::Value> ElementHost::call_method(
             control->checked = control->initial_checked;
             control->selected = control->initial_selected;
         }
+        return v8::Undefined(isolate);
+    }
+    // M7-1 form.submit() (exposed only on <form>): a minimal "exists and is
+    // callable" submission entry point. No arguments; returns undefined. It does
+    // NOT navigate, make a network request, dispatch a submit event, validate, or
+    // change any control's live value / default baseline — a deliberate no-op this
+    // phase. Callable on attached and detached forms.
+    if (name == "submit") {
         return v8::Undefined(isolate);
     }
     return v8::Undefined(isolate);
